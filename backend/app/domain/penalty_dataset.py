@@ -10,7 +10,7 @@ from backend.app.core.paths import DEMO_WORKBOOK_PATH, RUNTIME_ROOT
 
 
 DEFAULT_INPUT_PATH = DEMO_WORKBOOK_PATH
-DEFAULT_OUTPUT_PATH = RUNTIME_ROOT / "manual" / "penalty_automation_output.xlsx"
+DEFAULT_OUTPUT_PATH = RUNTIME_ROOT / "manual" / "agentic_loss_recovery_output.xlsx"
 DEFAULT_WORKING_FOLDER = RUNTIME_ROOT / "manual"
 DEFAULT_DATE_COLUMN = "Approval/Rejected DateTime"
 DEFAULT_REMARK_SEPARATOR = " / "

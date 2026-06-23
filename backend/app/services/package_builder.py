@@ -13,9 +13,52 @@ from backend.app.domain.complaint_message import MESSAGE_COLUMN
 PREPARED_CATEGORY_ROOT = Path("category_files") / "prepared"
 PROCESSED_CATEGORY_ROOT = Path("category_files") / "processed"
 MANIFEST_FILENAME = "manifest.json"
-PACKAGE_FILENAME = "penalty_automation_package.zip"
+PACKAGE_FILENAME = "agentic_loss_recovery_package.zip"
 FINAL_OUTPUT_FILENAME = "final_output.xlsx"
+AGENT_AUDIT_FILENAME = "agent_audit.xlsx"
+REVIEW_QUEUE_FILENAME = "review_queue.xlsx"
+AGENT_SUMMARY_FILENAME = "agent_summary.json"
+AGENT_AUDIT_COLUMNS = [
+    "booking_id",
+    "sub_category",
+    "recoverable_amount",
+    "review_status",
+    "decision",
+    "decision_source",
+    "llm_error",
+    "complaint_categories",
+    "confidence",
+    "recommended_recovery_amount",
+    "recommended_action",
+    "review_reason",
+    "rationale",
+    "specialist_agent",
+    "specialist_decision_source",
+    "specialist_llm_error",
+    "specialist_confidence",
+    "judge_decision_source",
+    "judge_llm_error",
+    "judge_confidence",
+    "evidence_ids",
+    "evidence_count",
+    "trace_count",
+]
+REVIEW_QUEUE_COLUMNS = [
+    "booking_id",
+    "sub_category",
+    "recoverable_amount",
+    "review_status",
+    "decision",
+    "decision_source",
+    "llm_error",
+    "confidence",
+    "recommended_action",
+    "review_reason",
+    "rationale",
+    "evidence_ids",
+]
 FINAL_EXPORT_COLUMNS = [
+    "booking_id",
     "complaint_reasons",
     "complaint_against",
     "complaint_against_id",
@@ -24,6 +67,7 @@ FINAL_EXPORT_COLUMNS = [
     "fine",
 ]
 FINAL_EXPORT_COLUMN_MAP = [
+    ("Booking ID", "booking_id"),
     ("Sub Category", "complaint_reasons"),
     ("complaint_against", "complaint_against"),
     ("complaint_against_id", "complaint_against_id"),
@@ -76,7 +120,6 @@ def build_category_output_payload(
     processed_path: Path,
     processed_df: pd.DataFrame,
     root_dir: Path,
-    preview_limit: int,
     failed: bool = False,
     error: str | None = None,
 ) -> dict[str, Any]:
@@ -87,7 +130,6 @@ def build_category_output_payload(
         "output_columns": processed_df.columns.tolist(),
         "prepared_filename": prepared_path.relative_to(root_dir).as_posix(),
         "processed_filename": processed_path.relative_to(root_dir).as_posix(),
-        "preview_rows": dataframe_preview(processed_df, limit=preview_limit),
         "status": "failed" if failed else "completed",
         "error": error,
     }
@@ -100,6 +142,8 @@ def build_manifest(
     prepared_rows: int,
     categories: list[dict[str, Any]],
     final_output: dict[str, Any],
+    agent_summary: dict[str, Any] | None = None,
+    agent_artifacts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "approval_date": approval_date,
@@ -108,6 +152,8 @@ def build_manifest(
         "prepared_rows": prepared_rows,
         "category_count": len(categories),
         "final_output": final_output,
+        "agent_summary": agent_summary or {},
+        "agent_artifacts": agent_artifacts or {},
         "categories": [
             {
                 "name": category["name"],
@@ -131,26 +177,77 @@ def write_package_zip(
     categories: list[dict[str, Any]],
     final_output_path: Path,
     root_dir: Path,
+    agent_artifact_paths: list[Path] | None = None,
 ) -> None:
     output_package_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(manifest_path, manifest_path.relative_to(root_dir).as_posix())
         archive.write(final_output_path, final_output_path.relative_to(root_dir).as_posix())
+        for artifact_path in agent_artifact_paths or []:
+            if artifact_path.exists():
+                archive.write(artifact_path, artifact_path.relative_to(root_dir).as_posix())
         for category in categories:
             archive.write(root_dir / category["prepared_filename"], category["prepared_filename"])
             archive.write(root_dir / category["processed_filename"], category["processed_filename"])
 
 
-def dataframe_preview(df: pd.DataFrame, *, limit: int) -> list[dict[str, Any]]:
-    preview_df = df.head(limit).copy()
-    preview_df = preview_df.astype(object).where(pd.notna(preview_df), "")
-    records = preview_df.to_dict(orient="records")
-    return [{key: serialize_preview_value(value) for key, value in record.items()} for record in records]
+def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        decision = case.get("final_decision") or {}
+        specialist = case.get("specialist_decision") or {}
+        judge = case.get("judge_decision") or {}
+        rows.append(
+            {
+                "booking_id": case.get("booking_id", ""),
+                "sub_category": case.get("sub_category", ""),
+                "recoverable_amount": case.get("recoverable_amount", 0),
+                "review_status": case.get("review_status", ""),
+                "decision": decision.get("decision", ""),
+                "decision_source": decision.get("decision_source", ""),
+                "llm_error": decision.get("llm_error", ""),
+                "complaint_categories": " + ".join(decision.get("complaint_categories", [])),
+                "confidence": decision.get("confidence", 0),
+                "recommended_recovery_amount": decision.get("recommended_recovery_amount", 0),
+                "recommended_action": decision.get("recommended_action", ""),
+                "review_reason": decision.get("review_reason", ""),
+                "rationale": decision.get("rationale", ""),
+                "specialist_agent": specialist.get("agent", ""),
+                "specialist_decision_source": specialist.get("decision_source", ""),
+                "specialist_llm_error": specialist.get("llm_error", ""),
+                "specialist_confidence": specialist.get("confidence", 0),
+                "judge_decision_source": judge.get("decision_source", ""),
+                "judge_llm_error": judge.get("llm_error", ""),
+                "judge_confidence": judge.get("confidence", 0),
+                "evidence_ids": ", ".join(decision.get("evidence_ids", [])),
+                "evidence_count": len(case.get("evidence", [])),
+                "trace_count": len(case.get("trace", [])),
+            }
+        )
+    return pd.DataFrame(rows, columns=AGENT_AUDIT_COLUMNS)
 
 
-def serialize_preview_value(value: Any) -> Any:
-    if isinstance(value, pd.Timestamp):
-        return value.strftime("%Y-%m-%d")
-    if hasattr(value, "isoformat") and not isinstance(value, str):
-        return value.isoformat()
-    return value
+def build_review_queue_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        if case.get("review_status") == "auto_ready":
+            continue
+
+        decision = case.get("final_decision") or {}
+        rows.append(
+            {
+                "booking_id": case.get("booking_id", ""),
+                "sub_category": case.get("sub_category", ""),
+                "recoverable_amount": case.get("recoverable_amount", 0),
+                "review_status": case.get("review_status", ""),
+                "decision": decision.get("decision", ""),
+                "decision_source": decision.get("decision_source", ""),
+                "llm_error": decision.get("llm_error", ""),
+                "confidence": decision.get("confidence", 0),
+                "recommended_action": decision.get("recommended_action", ""),
+                "review_reason": decision.get("review_reason", ""),
+                "rationale": decision.get("rationale", ""),
+                "evidence_ids": ", ".join(decision.get("evidence_ids", [])),
+            }
+        )
+    return pd.DataFrame(rows, columns=REVIEW_QUEUE_COLUMNS)

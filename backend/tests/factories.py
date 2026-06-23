@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -327,6 +328,18 @@ def write_two_category_workbook(path: Path) -> None:
 
 
 def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
+    if "Agent specialist decision task." in prompt or "Judge Agent verification task." in prompt:
+        return build_agent_decision_response(prompt)
+    if "Portfolio Summary Agent task." in prompt:
+        return json.dumps(
+            {
+                "executive_summary": "LLM portfolio summary: recovery cases were investigated and routed by confidence.",
+                "top_complaint_drivers": ["Cab Delay: high recoverable exposure"],
+                "recommended_actions": ["Prioritize high-confidence recoveries and review evidence gaps."],
+                "missing_data_hotspots": [],
+                "category_breakdown": [],
+            }
+        )
     if "Complaint category classification task." in prompt:
         if "extra cash" in prompt or "Sub Category: Extra Money Taken" in prompt:
             return '{"categories": ["Extra Money Taken"]}'
@@ -346,6 +359,51 @@ def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
     if "Customer call comment:" in prompt:
         return "Mock combined summary."
     return "Mock Incabs insight."
+
+
+def build_agent_decision_response(prompt: str) -> str:
+    sub_category = regex_value(prompt, r'"sub_category":\s*"([^"]+)"')
+    evidence_ids = list(dict.fromkeys(re.findall(r'"id":\s*"([^"]+)"', prompt)))[:3]
+    amount = float(regex_value(prompt, r'"recoverable_amount":\s*([0-9.]+)') or 100)
+    category = agent_category_for_subcategory(sub_category, prompt)
+    status = "auto_ready" if evidence_ids else "missing_evidence"
+    return json.dumps(
+        {
+            "decision": "valid_penalty" if status == "auto_ready" else "needs_review",
+            "complaint_categories": [category],
+            "confidence": 0.91 if status == "auto_ready" else 0.55,
+            "recommended_recovery_amount": amount if status == "auto_ready" else 0,
+            "rationale": f"Mock LLM found {category} supported by cited evidence.",
+            "recommended_action": "Ready for Cab Ops recovery package" if status == "auto_ready" else "Review manually",
+            "review_status": status,
+            "review_reason": "Mock LLM judge approved the cited evidence." if status == "auto_ready" else "Evidence is incomplete.",
+            "evidence_ids": evidence_ids,
+        }
+    )
+
+
+def agent_category_for_subcategory(sub_category: str, prompt: str) -> str:
+    normalized = sub_category.casefold()
+    if "extra money" in normalized:
+        return "Extra Money Taken"
+    if "fulfillment" in normalized or "fulfilment" in normalized:
+        return "Vendor No Show"
+    if "lower category" in normalized:
+        return "Low Category Vehicle"
+    if "driver behavior" in normalized or "driver behaviour" in normalized:
+        return "Bad Driver Behaviour/Skill"
+    if "ac not working" in normalized:
+        return "AC Not Working"
+    if "vehicle breakdown" in normalized:
+        return "Cab Breakdown"
+    if "Cab Delayed > 15 Minutes" in prompt:
+        return "Cab Delayed > 15 Minutes"
+    return "Cab Delay"
+
+
+def regex_value(value: str, pattern: str) -> str:
+    match = re.search(pattern, value)
+    return match.group(1) if match else ""
 
 
 def assert_complaint_metadata(row: pd.Series | dict[str, object], dispatch_id: str) -> None:

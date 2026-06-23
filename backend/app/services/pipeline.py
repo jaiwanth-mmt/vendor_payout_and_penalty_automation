@@ -10,6 +10,13 @@ from typing import Any
 
 import pandas as pd
 
+from backend.app.agents.orchestrator import (
+    build_agent_progress,
+    build_case_counts,
+    build_portfolio_summary,
+    build_portfolio_summary_async,
+    investigate_category_frame_async,
+)
 from backend.app.domain.cab_delay_enrichment import call_azure_openai_async, first_tracking_row, read_tracking_data
 from backend.app.domain.category_processors import (
     CAB_DELAY_CATEGORY,
@@ -66,6 +73,8 @@ from backend.app.domain.subcategories import (
 )
 from backend.app.domain.tracking_common import enrich_common_tracking_fields
 from backend.app.services.package_builder import (
+    AGENT_AUDIT_FILENAME,
+    AGENT_SUMMARY_FILENAME,
     FINAL_EXPORT_COLUMNS,
     FINAL_EXPORT_COLUMN_MAP,
     FINAL_OUTPUT_FILENAME,
@@ -73,12 +82,13 @@ from backend.app.services.package_builder import (
     PACKAGE_FILENAME,
     PREPARED_CATEGORY_ROOT,
     PROCESSED_CATEGORY_ROOT,
+    REVIEW_QUEUE_FILENAME,
+    build_agent_audit_dataframe,
     build_category_output_payload,
     build_final_output_dataframe,
     build_final_output_summary,
     build_manifest,
-    dataframe_preview,
-    serialize_preview_value,
+    build_review_queue_dataframe,
     write_package_zip,
     write_workbook,
 )
@@ -114,6 +124,13 @@ class PipelineResult:
     manifest_path: Path
     final_output_path: Path
     final_output: dict[str, Any]
+    agent_audit_path: Path
+    review_queue_path: Path
+    agent_summary_path: Path
+    agent_summary: dict[str, Any]
+    case_counts: dict[str, int]
+    agent_progress: list[dict[str, Any]]
+    agent_cases: list[dict[str, Any]]
 
 
 def noop_step_units(_step_id: str, _completed_units: int, _total_units: int, _message: str) -> None:
@@ -141,7 +158,6 @@ def process_uploaded_workbook(
     on_category_progress_initialized: CategoryProgressInitCallback | None = None,
     on_category_progress: CategoryProgressCallback | None = None,
     reason_generator: LlmGenerator | None = None,
-    preview_limit: int = 25,
     category_processing_concurrency: int | None = None,
     llm_concurrency: int | None = None,
     cab_delay_llm_concurrency: int | None = None,
@@ -159,7 +175,6 @@ def process_uploaded_workbook(
             on_category_progress_initialized=on_category_progress_initialized,
             on_category_progress=on_category_progress,
             reason_generator=reason_generator,
-            preview_limit=preview_limit,
             category_processing_concurrency=category_processing_concurrency,
             llm_concurrency=llm_concurrency,
             cab_delay_llm_concurrency=cab_delay_llm_concurrency,
@@ -180,7 +195,6 @@ async def process_uploaded_workbook_async(
     on_category_progress_initialized: CategoryProgressInitCallback | None = None,
     on_category_progress: CategoryProgressCallback | None = None,
     reason_generator: LlmGenerator | None = None,
-    preview_limit: int = 25,
     category_processing_concurrency: int | None = None,
     llm_concurrency: int | None = None,
     cab_delay_llm_concurrency: int | None = None,
@@ -288,6 +302,7 @@ async def process_uploaded_workbook_async(
 
     category_outputs: list[dict[str, Any] | None] = [None] * len(category_batches)
     processed_category_frames: list[pd.DataFrame | None] = [None] * len(category_batches)
+    agent_cases_by_category: list[list[dict[str, Any]] | None] = [None] * len(category_batches)
     cab_delay_summary = InsightSummary()
     completed_categories = 0
 
@@ -304,7 +319,6 @@ async def process_uploaded_workbook_async(
                 prepared_dir=prepared_dir,
                 processed_dir=processed_dir,
                 root_dir=job_dir,
-                preview_limit=preview_limit,
                 on_category_progress=update_category_progress,
             )
         )
@@ -315,6 +329,7 @@ async def process_uploaded_workbook_async(
         index, _batch, outcome, category_output, category_warnings = await completed_task
         category_outputs[index] = category_output
         processed_category_frames[index] = outcome.df
+        agent_cases_by_category[index] = outcome.agent_cases
         if outcome.insight_summary:
             cab_delay_summary = outcome.insight_summary
         for warning in category_warnings:
@@ -336,21 +351,51 @@ async def process_uploaded_workbook_async(
 
     on_step_start("package_prepared", "Packaging subcategory workbooks")
     final_output_path = job_dir / FINAL_OUTPUT_FILENAME
+    agent_audit_path = job_dir / AGENT_AUDIT_FILENAME
+    review_queue_path = job_dir / REVIEW_QUEUE_FILENAME
+    agent_summary_path = job_dir / AGENT_SUMMARY_FILENAME
+    agent_cases = [
+        case
+        for category_cases in agent_cases_by_category
+        if category_cases is not None
+        for case in category_cases
+    ]
+    agent_summary = await build_portfolio_summary_async(
+        agent_cases,
+        llm_generator=active_llm_generator,
+        llm_concurrency=llm_concurrency_limit,
+    )
+    case_counts = build_case_counts(agent_cases)
+    agent_progress = build_agent_progress(agent_cases, agent_summary=agent_summary)
     final_output_df = build_final_output_dataframe(
         [frame for frame in processed_category_frames if frame is not None]
     )
     await asyncio.to_thread(write_workbook, final_output_df, final_output_path)
+    await asyncio.to_thread(write_workbook, build_agent_audit_dataframe(agent_cases), agent_audit_path)
+    await asyncio.to_thread(write_workbook, build_review_queue_dataframe(agent_cases), review_queue_path)
+    await asyncio.to_thread(
+        agent_summary_path.write_text,
+        json.dumps(agent_summary, indent=2, ensure_ascii=False),
+        "utf-8",
+    )
     final_output = build_final_output_summary(
         final_output_path=final_output_path,
         final_output_df=final_output_df,
         root_dir=job_dir,
     )
+    agent_artifacts = {
+        "agent_audit": agent_audit_path.relative_to(job_dir).as_posix(),
+        "review_queue": review_queue_path.relative_to(job_dir).as_posix(),
+        "agent_summary": agent_summary_path.relative_to(job_dir).as_posix(),
+    }
     manifest = build_manifest(
         approval_date=approval_date,
         raw_rows=len(raw_df),
         prepared_rows=len(prepared_df),
         categories=finalized_category_outputs,
         final_output=final_output,
+        agent_summary=agent_summary,
+        agent_artifacts=agent_artifacts,
     )
     await asyncio.to_thread(manifest_path.write_text, json.dumps(manifest, indent=2), "utf-8")
     await asyncio.to_thread(
@@ -360,6 +405,7 @@ async def process_uploaded_workbook_async(
         categories=finalized_category_outputs,
         final_output_path=final_output_path,
         root_dir=job_dir,
+        agent_artifact_paths=[agent_audit_path, review_queue_path, agent_summary_path],
     )
     on_step_complete(
         "package_prepared",
@@ -384,6 +430,14 @@ async def process_uploaded_workbook_async(
         "existing_comment_summary_rows": cab_delay_summary.existing_comment_summary_rows,
         "generated_comment_summary_rows": cab_delay_summary.generated_comment_summary_rows,
         "failed_comment_summary_rows": cab_delay_summary.failed_comment_summary_rows,
+        "agent_total_cases": case_counts["total_cases"],
+        "agent_auto_ready_cases": case_counts["auto_ready"],
+        "agent_needs_review_cases": case_counts["needs_review"],
+        "agent_missing_evidence_cases": case_counts["missing_evidence"],
+        "agent_contradiction_cases": case_counts["contradiction"],
+        "agent_failed_cases": case_counts["failed"],
+        "agent_total_recoverable_amount": agent_summary["total_recoverable_amount"],
+        "agent_high_confidence_recoverable_amount": agent_summary["high_confidence_recoverable_amount"],
     }
     return PipelineResult(
         metrics=metrics,
@@ -393,6 +447,13 @@ async def process_uploaded_workbook_async(
         manifest_path=manifest_path,
         final_output_path=final_output_path,
         final_output=final_output,
+        agent_audit_path=agent_audit_path,
+        review_queue_path=review_queue_path,
+        agent_summary_path=agent_summary_path,
+        agent_summary=agent_summary,
+        case_counts=case_counts,
+        agent_progress=agent_progress,
+        agent_cases=agent_cases,
     )
 
 
@@ -457,7 +518,6 @@ async def process_category_for_package(
     prepared_dir: Path,
     processed_dir: Path,
     root_dir: Path,
-    preview_limit: int,
     on_category_progress: CategoryProgressCallback,
 ) -> tuple[int, CategoryBatch, CategoryProcessingOutcome, dict[str, Any], list[dict[str, Any]]]:
     warnings: list[dict[str, Any]] = []
@@ -485,10 +545,17 @@ async def process_category_for_package(
                 llm_generator=llm_generator,
                 llm_concurrency=llm_concurrency,
             )
+            fallback_df, agent_cases = await investigate_category_frame_async(
+                fallback_df,
+                tracking_bookings=tracking_bookings,
+                llm_generator=llm_generator,
+                llm_concurrency=llm_concurrency,
+            )
             outcome = CategoryProcessingOutcome(
                 df=fallback_df.loc[:, COMMON_PROCESSED_OUTPUT_COLUMNS].copy(),
                 failed=True,
                 error=str(error),
+                agent_cases=agent_cases,
             )
             warnings.append(
                 {
@@ -510,7 +577,6 @@ async def process_category_for_package(
             processed_path=processed_path,
             processed_df=outcome.df,
             root_dir=root_dir,
-            preview_limit=preview_limit,
             failed=outcome.failed,
             error=outcome.error,
         )

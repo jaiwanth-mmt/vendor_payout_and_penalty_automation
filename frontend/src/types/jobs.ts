@@ -1,4 +1,4 @@
-export type StepStatus = "pending" | "running" | "completed" | "failed";
+export type StepStatus = "pending" | "running" | "completed" | "warning" | "failed";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type StepState = {
@@ -27,7 +27,6 @@ export type CategoryOutput = {
   output_columns: string[];
   prepared_filename: string;
   processed_filename: string;
-  preview_rows: PreviewRow[];
   status: StepStatus;
   error: string | null;
 };
@@ -39,10 +38,106 @@ export type FinalOutputSummary = {
   download_ready: boolean;
 };
 
+export type ReviewQueueItem = {
+  booking_id: string;
+  sub_category: string;
+  recoverable_amount: number;
+  review_status: string;
+  decision: string;
+  confidence: number;
+  recommended_action: string;
+  review_reason: string;
+};
+
+export type AgentProgressItem = {
+  agent: string;
+  status: StepStatus;
+  completed_units: number;
+  total_units: number;
+  message: string;
+};
+
+export type AgentSummary = {
+  executive_summary: string;
+  case_counts: Record<string, number>;
+  total_recoverable_amount: number;
+  high_confidence_recoverable_amount: number;
+  top_complaint_drivers: string[];
+  category_breakdown: Array<Record<string, string | number>>;
+  missing_data_hotspots: string[];
+  recommended_actions: string[];
+};
+
+export type EvidenceItem = {
+  id: string;
+  title: string;
+  source: string;
+  status: string;
+  summary: string;
+  fields: Record<string, string | number | boolean | null | string[]>;
+  error: string | null;
+};
+
+export type AgentTraceStep = {
+  agent: string;
+  action: string;
+  status: string;
+  summary: string;
+  evidence_ids: string[];
+  metadata: Record<string, string | number | boolean | null | string[]>;
+};
+
+export type AgentDecision = {
+  agent: string;
+  decision: string;
+  decision_source: "llm" | "fallback";
+  complaint_categories: string[];
+  confidence: number;
+  recommended_recovery_amount: number;
+  rationale: string;
+  recommended_action: string;
+  review_status: string;
+  review_reason: string;
+  evidence_ids: string[];
+  llm_error: string | null;
+};
+
+export type AgentCase = {
+  booking_id: string;
+  sub_category: string;
+  remarks: string;
+  recoverable_amount: number;
+  row_index: number;
+  review_status: string;
+  evidence: EvidenceItem[];
+  trace: AgentTraceStep[];
+  specialist_decision: AgentDecision | null;
+  judge_decision: AgentDecision | null;
+  final_decision: AgentDecision | null;
+};
+
+export type AgentCasesResponse = {
+  cases: AgentCase[];
+  case_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
 export type FinalOutputPreviewResponse = {
   columns: string[];
   rows: PreviewRow[];
   row_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+export type CategoryPreviewResponse = FinalOutputPreviewResponse;
+
+export type ReviewQueuePageResponse = {
+  items: ReviewQueueItem[];
+  item_count: number;
   page: number;
   page_size: number;
   total_pages: number;
@@ -82,6 +177,9 @@ export type JobResponse = {
   category_progress: CategoryProgress[];
   category_outputs: CategoryOutput[];
   final_output: FinalOutputSummary | null;
+  agent_summary: AgentSummary | null;
+  case_counts: Record<string, number>;
+  agent_progress: AgentProgressItem[];
   download_ready: boolean;
   error: string | null;
 };

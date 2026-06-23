@@ -20,6 +20,7 @@ from backend.app.domain.category_processors import (
     FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS,
     LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS,
     enrich_cab_delay_insights_async,
+    enrich_lower_category_vehicle_async,
     enrich_message_column_async,
     process_category_batch,
 )
@@ -85,9 +86,11 @@ def test_async_cab_delay_llm_generation_respects_concurrency_limit() -> None:
     current_calls = 0
     max_seen = 0
     progress_updates: list[dict[str, int]] = []
+    token_budgets: list[int] = []
 
-    async def async_llm(_prompt: str, _tokens: int, _effort: str) -> str:
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
         nonlocal current_calls, max_seen
+        token_budgets.append(tokens)
         current_calls += 1
         max_seen = max(max_seen, current_calls)
         await asyncio.sleep(0.01)
@@ -107,6 +110,7 @@ def test_async_cab_delay_llm_generation_respects_concurrency_limit() -> None:
     asyncio.run(run())
 
     assert max_seen == 2
+    assert token_budgets == [2048] * 4
     assert progress_updates[-1]["generated_insight_rows"] == 4
 
 
@@ -124,9 +128,11 @@ def test_async_message_classification_respects_concurrency_limit() -> None:
     )
     current_calls = 0
     max_seen = 0
+    token_budgets: list[int] = []
 
-    async def async_llm(_prompt: str, _tokens: int, _effort: str) -> str:
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
         nonlocal current_calls, max_seen
+        token_budgets.append(tokens)
         current_calls += 1
         max_seen = max(max_seen, current_calls)
         await asyncio.sleep(0.01)
@@ -143,13 +149,53 @@ def test_async_message_classification_respects_concurrency_limit() -> None:
     output = asyncio.run(run())
 
     assert max_seen == 2
+    assert token_budgets == [2048] * 4
     assert output[MESSAGE_COLUMN].tolist() == ["Extra Money Taken"] * 4
+
+
+def test_async_lower_category_vehicle_extraction_uses_large_default_token_budget() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B7",
+                "Sub Category": "Lower Category Vehicle",
+                "Remarks": "low category vehicle",
+            }
+        ]
+    )
+    tracking_bookings = {
+        "B7": {
+            "tracking_reports_raw": [{"vehicle_subcategory": "basic-electric", "vehicle_type": "sedan"}],
+            "comments": "Customer booked an electric sedan but received a CNG hatchback instead.",
+        }
+    }
+    token_budgets: list[int] = []
+
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
+        token_budgets.append(tokens)
+        return '{"customer_booked_vehicle": "electric sedan", "customer_received_vehicle": "CNG hatchback"}'
+
+    async def run() -> pd.DataFrame:
+        output, warnings = await enrich_lower_category_vehicle_async(
+            df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+        assert warnings == []
+        return output
+
+    output = asyncio.run(run())
+
+    assert token_budgets == [2048]
+    assert output.loc[0, CUSTOMER_BOOKED_VEHICLE_COLUMN] == "electric sedan"
+    assert output.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
 
 
 def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
     write_tracking_json_with_extra_money(tracking_path)
 
@@ -184,17 +230,14 @@ def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> 
     assert output_df.loc[0, "comments"] == "Customer said driver collected extra cash for toll and parking."
     assert output_df.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
     assert extra_money_category["output_columns"] == EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS
-    assert extra_money_category["preview_rows"][0]["total_driver_charge"] == 150
-    assert extra_money_category["preview_rows"][0]["comments"] == (
-        "Customer said driver collected extra cash for toll and parking."
-    )
-    assert extra_money_category["preview_rows"][0][MESSAGE_COLUMN] == "Extra Money Taken"
+    assert extra_money_category["row_count"] == 1
+    assert "preview_rows" not in extra_money_category
 
 
 def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_fulfillment_workbook(workbook_path)
     write_tracking_json_with_fulfillment(tracking_path)
 
@@ -231,16 +274,14 @@ def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_pat
     assert output_df.loc[0, FULFILLMENT_DRIVER_ARRIVED_COLUMN] == "19 Mar 2026 3:21:44 AM"
     assert output_df.loc[0, MESSAGE_COLUMN] == "Vendor No Show"
     assert fulfillment_category["output_columns"] == FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS
-    assert fulfillment_category["preview_rows"][0][FULFILLMENT_PREFERRED_START_TIME_COLUMN] == (
-        "19 Mar 2026 3:15 AM"
-    )
-    assert fulfillment_category["preview_rows"][0][MESSAGE_COLUMN] == "Vendor No Show"
+    assert fulfillment_category["row_count"] == 1
+    assert "preview_rows" not in fulfillment_category
 
 
 def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_lower_category_workbook(workbook_path)
     write_tracking_json_with_lower_category(tracking_path)
 
@@ -278,15 +319,14 @@ def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_pa
     assert output_df.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
     assert output_df.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
     assert lower_category["output_columns"] == LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS
-    assert lower_category["preview_rows"][0][CUSTOMER_BOOKED_VEHICLE_COLUMN] == "electric sedan"
-    assert lower_category["preview_rows"][0][CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
-    assert lower_category["preview_rows"][0][MESSAGE_COLUMN] == "Low Category Vehicle"
+    assert lower_category["row_count"] == 1
+    assert "preview_rows" not in lower_category
 
 
 def test_lower_category_vehicle_llm_failure_warns_and_leaves_values_blank(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_lower_category_workbook(workbook_path)
     write_tracking_json_with_lower_category(tracking_path)
 

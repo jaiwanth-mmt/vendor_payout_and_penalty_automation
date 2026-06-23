@@ -43,12 +43,12 @@ def test_build_booking_wise_output_adds_comments_field() -> None:
         selected_columns=["order_reference_number", "dispatch_id"],
         dropped_columns=[],
         table_name="tracking_reports_raw",
-        source_workbook=Path("penalty_automation_output.xlsx"),
+        source_workbook=Path("agentic_loss_recovery_output.xlsx"),
         comments_by_booking={"B1": "call transcript"},
         redash_comments_metadata={"enabled": True},
     )
 
-    assert payload["metadata"]["source_workbook"] == "penalty_automation_output.xlsx"
+    assert payload["metadata"]["source_workbook"] == "agentic_loss_recovery_output.xlsx"
     assert payload["metadata"]["commented_booking_count"] == 1
     assert payload["metadata"]["redash_comments"] == {"enabled": True}
     assert payload["bookings"]["B1"]["comments"] == "call transcript"

@@ -94,6 +94,16 @@ export function usePenaltyJob() {
     window.location.href = apiUrl(`/api/jobs/${job.job_id}/final-output/download`);
   }, [job]);
 
+  const downloadAgentAudit = useCallback(() => {
+    if (job?.status !== "succeeded") return;
+    window.location.href = apiUrl(`/api/jobs/${job.job_id}/agent-audit/download`);
+  }, [job]);
+
+  const downloadReviewQueue = useCallback(() => {
+    if (job?.status !== "succeeded") return;
+    window.location.href = apiUrl(`/api/jobs/${job.job_id}/review-queue/download`);
+  }, [job]);
+
   return {
     selectedFile,
     setSelectedFile,
@@ -108,6 +118,8 @@ export function usePenaltyJob() {
     visibleMetrics,
     submitJob,
     downloadPackage,
-    downloadFinalOutput
+    downloadFinalOutput,
+    downloadAgentAudit,
+    downloadReviewQueue
   };
 }

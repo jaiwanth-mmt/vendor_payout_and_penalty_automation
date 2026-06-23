@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "source_workbook": "data/demo/expected_penalty_automation_output.xlsx",
+    "source_workbook": "data/demo/expected_agentic_loss_recovery_output.xlsx",
     "table_name": "tracking_reports_raw",
     "booking_count": 71,
     "selected_column_count": 83,

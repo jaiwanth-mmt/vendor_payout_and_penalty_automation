@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchFinalOutputPreview } from "../api/jobs";
 import type { FinalOutputPreviewResponse, JobResponse } from "../types/jobs";
+import BookingSearchForm from "./BookingSearchForm";
 
 type FinalOutputPreviewProps = {
   job: JobResponse | null;
@@ -21,6 +22,8 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
   const [preview, setPreview] = useState<FinalOutputPreviewResponse | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,12 +39,15 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
     if (!job) return "Run a workbook to generate the combined file";
     if (job.status === "failed") return "Final output was not generated";
     if (!isComplete) return "Final output will appear after processing";
+    if (activeSearch) return `${rowCount.toLocaleString()} rows matching ${activeSearch}`;
     return `${rowCount.toLocaleString()} rows across ${columns.length} columns`;
-  }, [columns.length, isComplete, job, rowCount]);
+  }, [activeSearch, columns.length, isComplete, job, rowCount]);
 
   useEffect(() => {
     setPreview(null);
     setPage(1);
+    setSearchInput("");
+    setActiveSearch("");
     setError(null);
   }, [job?.job_id]);
 
@@ -56,7 +62,7 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
     setIsLoading(true);
     setError(null);
 
-    fetchFinalOutputPreview(job.job_id, page, pageSize)
+    fetchFinalOutputPreview(job.job_id, page, pageSize, activeSearch)
       .then((payload) => {
         if (!isCancelled) {
           setPreview(payload);
@@ -80,10 +86,23 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
     return () => {
       isCancelled = true;
     };
-  }, [canPreview, job?.job_id, page, pageSize]);
+  }, [activeSearch, canPreview, job?.job_id, page, pageSize]);
 
   function handlePageSizeChange(value: string) {
     setPageSize(Number(value));
+    setPage(1);
+  }
+
+  function handleSearch() {
+    const trimmedSearch = searchInput.trim();
+    setSearchInput(trimmedSearch);
+    setActiveSearch(trimmedSearch);
+    setPage(1);
+  }
+
+  function handleClearSearch() {
+    setSearchInput("");
+    setActiveSearch("");
     setPage(1);
   }
 
@@ -98,7 +117,21 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
           </div>
         </div>
         <div className="finalOutputActions">
-          {job?.final_output && <span className="previewCount">{job.final_output.row_count.toLocaleString()} rows</span>}
+          <BookingSearchForm
+            inputId="final-output-booking-search"
+            value={searchInput}
+            placeholder="Search booking ID"
+            disabled={!canPreview}
+            isActive={Boolean(activeSearch)}
+            onValueChange={setSearchInput}
+            onSearch={handleSearch}
+            onClear={handleClearSearch}
+          />
+          {job?.final_output && (
+            <span className="previewCount">
+              {activeSearch ? `${rowCount.toLocaleString()} matches` : `${job.final_output.row_count.toLocaleString()} rows`}
+            </span>
+          )}
           <button className="ghostButton finalDownloadButton" type="button" disabled={!canPreview} onClick={onDownload}>
             <Download size={17} />
             <span>Download final XLSX</span>
@@ -157,7 +190,7 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
         ) : (
           <div className="tableEmpty">
             <FileSpreadsheet size={30} />
-            <span>Final output preview will render here</span>
+            <span>{activeSearch ? `No final output rows match ${activeSearch}` : "Final output preview will render here"}</span>
           </div>
         )}
       </div>

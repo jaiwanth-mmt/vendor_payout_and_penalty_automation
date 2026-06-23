@@ -21,7 +21,7 @@ from backend.app.services import package_builder, pipeline
 def test_demo_paths_are_repo_relative() -> None:
     assert DEMO_WORKBOOK_PATH == REPO_ROOT / "data" / "demo" / "qliksense_dump.xlsx"
     assert DEMO_TRACKING_JSON_PATH == REPO_ROOT / "data" / "demo" / "tracking_reports_by_booking.json"
-    assert DEMO_EXPECTED_OUTPUT_PATH == REPO_ROOT / "data" / "demo" / "expected_penalty_automation_output.xlsx"
+    assert DEMO_EXPECTED_OUTPUT_PATH == REPO_ROOT / "data" / "demo" / "expected_agentic_loss_recovery_output.xlsx"
     assert DEMO_WORKBOOK_PATH.exists()
     assert DEMO_TRACKING_JSON_PATH.exists()
     assert DEMO_EXPECTED_OUTPUT_PATH.exists()
