@@ -1,0 +1,517 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+from collections import defaultdict
+from datetime import date, datetime, time
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Iterable
+
+import pandas as pd
+import pymysql
+from pymysql.connections import Connection
+from pymysql.cursors import DictCursor
+
+from backend.app.core.env import DEFAULT_ENV_PATH, load_env_file
+from backend.app.core.paths import DEMO_EXPECTED_OUTPUT_PATH, DEMO_TRACKING_JSON_PATH, REPO_ROOT
+from backend.app.integrations.redash_call_comments import (
+    DEFAULT_REDASH_BATCH_SIZE,
+    DEFAULT_REDASH_HOST,
+    DEFAULT_REDASH_SOURCE_IDS,
+    fetch_call_comments_for_booking_ids,
+    parse_source_ids,
+)
+
+
+DEFAULT_INPUT_PATH = DEMO_EXPECTED_OUTPUT_PATH
+DEFAULT_OUTPUT_PATH = DEMO_TRACKING_JSON_PATH
+DEFAULT_DB_HOST = "10.212.92.159"
+DEFAULT_DB_PORT = 3307
+DEFAULT_DB_USER = "incabs_blocks_and_confirms_stg"
+DEFAULT_DB_NAME = "incabs_blocks_and_confirms"
+DEFAULT_TABLE_NAME = "tracking_reports_raw"
+ORDER_REFERENCE_COLUMN = "order_reference_number"
+
+CURATED_TRACKING_COLUMNS = [
+    "dispatch_id",
+    ORDER_REFERENCE_COLUMN,
+    "ref_number",
+    "booking_status",
+    "tracking_status",
+    "complaints_count",
+    "is_cancelled",
+    "cancelled_by_name",
+    "cancelled_at",
+    "cancellation_reason",
+    "cancellation_string",
+    "is_unfulfilled",
+    "unfulfilled_reason",
+    "unfulfilled_timestamp",
+    "not_boarded_timestamp",
+    "not_boarded_refund",
+    "terminal_status",
+    "terminal_status_reason",
+    "type",
+    "trip_type",
+    "ttrip_type",
+    "sub_trip_type",
+    "booking_tags",
+    "flags",
+    "vehicle_subcategory",
+    "vehicle_type",
+    "vehicle_sku_id",
+    "supplier_id",
+    "original_supplier_id",
+    "supplier_reference_number",
+    "detached",
+    "detached_supplier_id",
+    "driver_assignment_count",
+    "action_by",
+    "createdAt",
+    "start_time",
+    "end_time",
+    "travel_date",
+    "modifiedAt",
+    "updatedAt_orig",
+    "supplier_assigned",
+    "first_driver_assigned",
+    "last_driver_assigned",
+    "driver_assigned",
+    "driver_reassigned",
+    "driver_started",
+    "driver_arrived",
+    "boarded",
+    "trip_alight",
+    "system_alight",
+    "driver_consent_datetime",
+    "source_name",
+    "source_point",
+    "source_city_name",
+    "source_state",
+    "destination_name",
+    "destination_point",
+    "destination_city_name",
+    "destination_state",
+    "amount",
+    "base_amount",
+    "amount_paid",
+    "cash_collected",
+    "per_km_rate",
+    "total_distance",
+    "total_distance_travelled",
+    "extra_travelled",
+    "extra_travelled_fare",
+    "extra_time",
+    "extra_time_fare",
+    "route_toll_charges",
+    "toll_charges",
+    "toll_paid",
+    "parking_charges",
+    "state_tax",
+    "airport_entry_fee",
+    "night_charges",
+    "waiting_charges",
+    "miscellaneous_charges",
+    "driver_charge_per_day",
+    "total_driver_charge",
+    "started_latlon",
+    "arrived_latlon",
+    "boarded_latlon",
+    "alight_latlon",
+    "tracking_percentage",
+    "distance_missed",
+    "latlon_count",
+    "flight_number",
+    "flight_departure_time",
+    "flight_arrival_time",
+    "flight_date",
+    "is_flight_early",
+    "is_flight_delay",
+]
+
+ALWAYS_KEEP_COLUMNS = {"dispatch_id", ORDER_REFERENCE_COLUMN, "ref_number"}
+DEFAULT_NOISE_VALUES = {"0", "0.0", "false", "none", "nan", "nat"}
+
+
+def format_source_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def parse_args() -> argparse.Namespace:
+    load_env_file()
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Fetch useful tracking_reports_raw fields for Booking IDs present in "
+            "the demo penalty automation output workbook and store tracking rows booking-wise as JSON."
+        )
+    )
+    parser.add_argument("--input-path", type=Path, default=DEFAULT_INPUT_PATH)
+    parser.add_argument("--output-path", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--host", default=os.getenv("MYSQL_HOST", DEFAULT_DB_HOST))
+    parser.add_argument("--port", type=int, default=int(os.getenv("MYSQL_PORT", str(DEFAULT_DB_PORT))))
+    parser.add_argument("--user", default=os.getenv("MYSQL_USER", DEFAULT_DB_USER))
+    parser.add_argument("--password", default=os.getenv("MYSQL_PASSWORD"))
+    parser.add_argument("--database", default=os.getenv("MYSQL_DATABASE", DEFAULT_DB_NAME))
+    parser.add_argument("--table-name", default=os.getenv("MYSQL_TABLE_NAME", DEFAULT_TABLE_NAME))
+    parser.add_argument("--batch-size", type=int, default=100)
+    parser.add_argument("--redash-api-key", default=os.getenv("REDASH_API_KEY"))
+    parser.add_argument("--redash-host", default=os.getenv("REDASH_HOST", DEFAULT_REDASH_HOST))
+    parser.add_argument(
+        "--redash-source-ids",
+        default=os.getenv(
+            "REDASH_SOURCE_IDS",
+            ",".join(str(source_id) for source_id in DEFAULT_REDASH_SOURCE_IDS),
+        ),
+        help="Comma-separated Redash source IDs used to fetch call transcript comments.",
+    )
+    parser.add_argument(
+        "--redash-batch-size",
+        type=int,
+        default=int(os.getenv("REDASH_BATCH_SIZE", str(DEFAULT_REDASH_BATCH_SIZE))),
+    )
+    parser.add_argument(
+        "--skip-redash-comments",
+        action="store_true",
+        help="Build the tracking JSON without fetching Redash call transcript comments.",
+    )
+    parser.add_argument(
+        "--max-columns",
+        type=int,
+        default=0,
+        help="Maximum curated table columns to fetch. Use 0 to keep the full curated set.",
+    )
+    return parser.parse_args()
+
+
+def read_penalty_bookings(path: Path) -> pd.DataFrame:
+    df = pd.read_excel(path)
+    df.columns = [str(column).strip() for column in df.columns]
+
+    required_columns = {"Booking ID", "Sub Category", "Remarks"}
+    missing_columns = required_columns.difference(df.columns)
+    if missing_columns:
+        raise KeyError(f"Missing required columns in {path}: {sorted(missing_columns)}")
+
+    output = df.loc[:, ["Booking ID", "Sub Category", "Remarks"]].copy()
+    output["Booking ID"] = output["Booking ID"].astype("string").str.strip()
+    output = output.loc[output["Booking ID"].notna() & output["Booking ID"].ne("")].drop_duplicates("Booking ID")
+    return output
+
+
+def connect_to_mysql(args: argparse.Namespace) -> Connection:
+    if not args.password:
+        raise ValueError("MYSQL_PASSWORD is required. Set it in the environment or pass --password.")
+
+    return pymysql.connect(
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        password=args.password,
+        database=args.database,
+        charset="utf8mb4",
+        cursorclass=DictCursor,
+        connect_timeout=15,
+        read_timeout=120,
+        write_timeout=120,
+    )
+
+
+def normalize_identifier(value: str) -> str:
+    return re.sub(r"[\s_]+", "", value.casefold())
+
+
+def resolve_table_name(connection: Connection, database: str, requested_table_name: str) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT TABLE_NAME
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = %s
+            """,
+            (database,),
+        )
+        table_names = [row["TABLE_NAME"] for row in cursor.fetchall()]
+
+    if requested_table_name in table_names:
+        return requested_table_name
+
+    requested_normalized = normalize_identifier(requested_table_name)
+    for table_name in table_names:
+        if normalize_identifier(table_name) == requested_normalized:
+            return table_name
+
+    raise LookupError(f"Could not find table {requested_table_name!r} in database {database!r}.")
+
+
+def fetch_table_columns(connection: Connection, database: str, table_name: str) -> list[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = %s
+              AND TABLE_NAME = %s
+            ORDER BY ORDINAL_POSITION
+            """,
+            (database, table_name),
+        )
+        return [row["COLUMN_NAME"] for row in cursor.fetchall()]
+
+
+def choose_relevant_columns(columns: list[str], _penalty_df: pd.DataFrame, max_columns: int) -> list[str]:
+    available_columns_by_name = {column_name.casefold(): column_name for column_name in columns}
+    selected = [
+        available_columns_by_name[column_name.casefold()]
+        for column_name in CURATED_TRACKING_COLUMNS
+        if column_name.casefold() in available_columns_by_name
+    ]
+
+    if ORDER_REFERENCE_COLUMN.casefold() not in available_columns_by_name:
+        raise KeyError(f"Table does not contain required column {ORDER_REFERENCE_COLUMN!r}.")
+
+    if max_columns > 0:
+        selected = selected[:max_columns]
+    return selected
+
+
+def quote_identifier(identifier: str) -> str:
+    return f"`{identifier.replace('`', '``')}`"
+
+
+def chunked(values: list[str], size: int) -> Iterable[list[str]]:
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def fetch_tracking_rows(
+    connection: Connection,
+    database: str,
+    table_name: str,
+    columns: list[str],
+    booking_ids: list[str],
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    qualified_table_name = f"{quote_identifier(database)}.{quote_identifier(table_name)}"
+    selected_columns = ", ".join(quote_identifier(column) for column in columns)
+    all_rows: list[dict[str, Any]] = []
+
+    with connection.cursor() as cursor:
+        for booking_id_batch in chunked(booking_ids, batch_size):
+            placeholders = ", ".join(["%s"] * len(booking_id_batch))
+            sql = (
+                f"SELECT {selected_columns} "
+                f"FROM {qualified_table_name} "
+                f"WHERE {quote_identifier(ORDER_REFERENCE_COLUMN)} IN ({placeholders})"
+            )
+            cursor.execute(sql, booking_id_batch)
+            all_rows.extend(cursor.fetchall())
+
+    return all_rows
+
+
+def is_empty_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def normalize_value_for_pruning(value: Any) -> str:
+    if is_empty_value(value):
+        return ""
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return str(int(value))
+        return str(float(value))
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip().casefold()
+
+
+def prune_unhelpful_columns(
+    rows: list[dict[str, Any]],
+    selected_columns: list[str],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    kept_columns: list[str] = []
+    dropped_columns: list[str] = []
+
+    for column in selected_columns:
+        values = [row.get(column) for row in rows]
+        normalized_values = {
+            normalize_value_for_pruning(value)
+            for value in values
+            if not is_empty_value(value)
+        }
+
+        if column not in ALWAYS_KEEP_COLUMNS and not normalized_values:
+            dropped_columns.append(column)
+            continue
+
+        if column not in ALWAYS_KEEP_COLUMNS and normalized_values and normalized_values.issubset(DEFAULT_NOISE_VALUES):
+            dropped_columns.append(column)
+            continue
+
+        kept_columns.append(column)
+
+    pruned_rows = [
+        {column: row.get(column) for column in kept_columns}
+        for row in rows
+    ]
+    return pruned_rows, kept_columns, dropped_columns
+
+
+def to_json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ")
+    if isinstance(value, date | time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    return value
+
+
+def compact_json_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: to_json_safe(value)
+        for key, value in row.items()
+        if not is_empty_value(value)
+    }
+
+
+def build_booking_wise_output(
+    penalty_df: pd.DataFrame,
+    tracking_rows: list[dict[str, Any]],
+    selected_columns: list[str],
+    dropped_columns: list[str],
+    table_name: str,
+    source_workbook: Path,
+    comments_by_booking: dict[str, str] | None = None,
+    redash_comments_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    comments_by_booking = comments_by_booking or {}
+    rows_by_booking_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in tracking_rows:
+        booking_id = str(row.get(ORDER_REFERENCE_COLUMN, "")).strip()
+        if not booking_id:
+            continue
+
+        rows_by_booking_id[booking_id].append(compact_json_row(row))
+
+    bookings: dict[str, Any] = {}
+    for record in penalty_df.to_dict(orient="records"):
+        booking_id = str(record["Booking ID"]).strip()
+        booking = {
+            "penalty": {
+                "sub_category": record.get("Sub Category"),
+                "remarks": record.get("Remarks"),
+            }
+        }
+        comment = comments_by_booking.get(booking_id, "").strip()
+        if comment:
+            booking["comments"] = comment
+        booking["tracking_reports_raw"] = rows_by_booking_id.get(booking_id, [])
+        bookings[booking_id] = booking
+
+    metadata = {
+        "source_workbook": format_source_path(source_workbook),
+        "table_name": table_name,
+        "booking_count": len(bookings),
+        "selected_column_count": len(selected_columns),
+        "selected_columns": selected_columns,
+        "dropped_empty_or_default_columns": dropped_columns,
+        "matched_tracking_row_count": len(tracking_rows),
+        "commented_booking_count": len(comments_by_booking),
+    }
+    if redash_comments_metadata is not None:
+        metadata["redash_comments"] = redash_comments_metadata
+
+    return {
+        "metadata": metadata,
+        "bookings": bookings,
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    penalty_df = read_penalty_bookings(args.input_path)
+    booking_ids = penalty_df["Booking ID"].tolist()
+
+    with connect_to_mysql(args) as connection:
+        table_name = resolve_table_name(connection, args.database, args.table_name)
+        available_columns = fetch_table_columns(connection, args.database, table_name)
+        selected_columns = choose_relevant_columns(available_columns, penalty_df, args.max_columns)
+        tracking_rows = fetch_tracking_rows(
+            connection=connection,
+            database=args.database,
+            table_name=table_name,
+            columns=selected_columns,
+            booking_ids=booking_ids,
+            batch_size=args.batch_size,
+        )
+
+    tracking_rows, selected_columns, dropped_columns = prune_unhelpful_columns(
+        rows=tracking_rows,
+        selected_columns=selected_columns,
+    )
+
+    comments_by_booking: dict[str, str] = {}
+    redash_comments_metadata: dict[str, Any]
+    if args.skip_redash_comments:
+        redash_comments_metadata = {"enabled": False, "reason": "Skipped by --skip-redash-comments."}
+    elif args.redash_api_key:
+        source_ids = parse_source_ids(args.redash_source_ids)
+        comment_result = fetch_call_comments_for_booking_ids(
+            booking_ids=booking_ids,
+            api_key=args.redash_api_key,
+            source_ids=source_ids,
+            redash_host=args.redash_host,
+            batch_size=args.redash_batch_size,
+        )
+        comments_by_booking = comment_result.comments_by_booking
+        redash_comments_metadata = {
+            "enabled": True,
+            "redash_host": args.redash_host,
+            "source_id": comment_result.source_id,
+            "rows_fetched": len(comment_result.rows),
+            "booking_count_with_comments": len(comments_by_booking),
+        }
+    else:
+        redash_comments_metadata = {"enabled": False, "reason": "REDASH_API_KEY was not provided."}
+
+    output = build_booking_wise_output(
+        penalty_df=penalty_df,
+        tracking_rows=tracking_rows,
+        selected_columns=selected_columns,
+        dropped_columns=dropped_columns,
+        table_name=table_name,
+        source_workbook=args.input_path,
+        comments_by_booking=comments_by_booking,
+        redash_comments_metadata=redash_comments_metadata,
+    )
+    args.output_path.parent.mkdir(parents=True, exist_ok=True)
+    args.output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"Booking IDs from workbook: {len(booking_ids)}")
+    print(f"Tracking rows fetched: {len(tracking_rows)}")
+    print(f"Bookings with Redash comments: {len(comments_by_booking)}")
+    print(f"Selected table columns: {len(selected_columns)}")
+    print(f"Saved JSON output to: {args.output_path}")
+
+
+if __name__ == "__main__":
+    main()
