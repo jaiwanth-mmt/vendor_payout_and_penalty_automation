@@ -77,3 +77,14 @@ def test_llm_multiple_cab_delay_categories_are_collapsed_to_one() -> None:
     )
 
     assert message == "Cab Delay"
+
+
+def test_empty_llm_categories_do_not_fallback_to_row_context() -> None:
+    message = build_message_from_response(
+        '{"categories": []}',
+        sub_category="Lower Category Vehicle",
+        remarks="Lower Category Vehicle",
+        comments="Customer only asked for driver details.",
+    )
+
+    assert message == ""

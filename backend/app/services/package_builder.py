@@ -21,6 +21,7 @@ AGENT_SUMMARY_FILENAME = "agent_summary.json"
 AGENT_AUDIT_COLUMNS = [
     "booking_id",
     "sub_category",
+    "message",
     "recoverable_amount",
     "review_status",
     "decision",
@@ -32,6 +33,12 @@ AGENT_AUDIT_COLUMNS = [
     "recommended_action",
     "review_reason",
     "rationale",
+    "source_used",
+    "source_categories",
+    "row_categories",
+    "source_alignment_status",
+    "source_alignment_reason",
+    "mentioned_booking_ids",
     "specialist_agent",
     "specialist_decision_source",
     "specialist_llm_error",
@@ -46,6 +53,7 @@ AGENT_AUDIT_COLUMNS = [
 REVIEW_QUEUE_COLUMNS = [
     "booking_id",
     "sub_category",
+    "message",
     "recoverable_amount",
     "review_status",
     "decision",
@@ -55,6 +63,11 @@ REVIEW_QUEUE_COLUMNS = [
     "recommended_action",
     "review_reason",
     "rationale",
+    "source_used",
+    "source_categories",
+    "row_categories",
+    "source_alignment_status",
+    "source_alignment_reason",
     "evidence_ids",
 ]
 FINAL_EXPORT_COLUMNS = [
@@ -197,10 +210,12 @@ def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
         decision = case.get("final_decision") or {}
         specialist = case.get("specialist_decision") or {}
         judge = case.get("judge_decision") or {}
+        source_analysis = case.get("source_analysis") or {}
         rows.append(
             {
                 "booking_id": case.get("booking_id", ""),
                 "sub_category": case.get("sub_category", ""),
+                "message": case.get("message", ""),
                 "recoverable_amount": case.get("recoverable_amount", 0),
                 "review_status": case.get("review_status", ""),
                 "decision": decision.get("decision", ""),
@@ -212,6 +227,12 @@ def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
                 "recommended_action": decision.get("recommended_action", ""),
                 "review_reason": decision.get("review_reason", ""),
                 "rationale": decision.get("rationale", ""),
+                "source_used": source_analysis.get("source_label", ""),
+                "source_categories": join_values(source_analysis.get("source_categories", [])),
+                "row_categories": join_values(source_analysis.get("row_categories", [])),
+                "source_alignment_status": source_analysis.get("status", ""),
+                "source_alignment_reason": source_analysis.get("reason", ""),
+                "mentioned_booking_ids": join_values(source_analysis.get("mentioned_booking_ids", [])),
                 "specialist_agent": specialist.get("agent", ""),
                 "specialist_decision_source": specialist.get("decision_source", ""),
                 "specialist_llm_error": specialist.get("llm_error", ""),
@@ -234,10 +255,12 @@ def build_review_queue_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
             continue
 
         decision = case.get("final_decision") or {}
+        source_analysis = case.get("source_analysis") or {}
         rows.append(
             {
                 "booking_id": case.get("booking_id", ""),
                 "sub_category": case.get("sub_category", ""),
+                "message": case.get("message", ""),
                 "recoverable_amount": case.get("recoverable_amount", 0),
                 "review_status": case.get("review_status", ""),
                 "decision": decision.get("decision", ""),
@@ -247,7 +270,20 @@ def build_review_queue_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
                 "recommended_action": decision.get("recommended_action", ""),
                 "review_reason": decision.get("review_reason", ""),
                 "rationale": decision.get("rationale", ""),
+                "source_used": source_analysis.get("source_label", ""),
+                "source_categories": join_values(source_analysis.get("source_categories", [])),
+                "row_categories": join_values(source_analysis.get("row_categories", [])),
+                "source_alignment_status": source_analysis.get("status", ""),
+                "source_alignment_reason": source_analysis.get("reason", ""),
                 "evidence_ids": ", ".join(decision.get("evidence_ids", [])),
             }
         )
     return pd.DataFrame(rows, columns=REVIEW_QUEUE_COLUMNS)
+
+
+def join_values(value: Any) -> str:
+    if isinstance(value, list):
+        return " + ".join(str(item).strip() for item in value if str(item).strip())
+    if value is None:
+        return ""
+    return str(value).strip()

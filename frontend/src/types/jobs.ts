@@ -41,12 +41,20 @@ export type FinalOutputSummary = {
 export type ReviewQueueItem = {
   booking_id: string;
   sub_category: string;
+  message: string;
   recoverable_amount: number;
   review_status: string;
   decision: string;
   confidence: number;
   recommended_action: string;
   review_reason: string;
+  rationale: string;
+  source_used: string;
+  source_categories: string;
+  row_categories: string;
+  source_alignment_status: string;
+  source_alignment_reason: string;
+  evidence_ids: string;
 };
 
 export type AgentProgressItem = {
@@ -116,6 +124,23 @@ export type AgentDecision = {
   llm_error: string | null;
 };
 
+export type SourceAnalysis = {
+  primary_source: string;
+  source_label: string;
+  source_text: string;
+  source_evidence_id: string;
+  source_categories: string[];
+  row_categories: string[];
+  comments_categories: string[];
+  remarks_categories: string[];
+  sub_category_categories: string[];
+  mentioned_booking_ids: string[];
+  status: string;
+  review_status: string;
+  reason: string;
+  message: string;
+};
+
 export type AgentCase = {
   booking_id: string;
   sub_category: string;
@@ -124,6 +149,8 @@ export type AgentCase = {
   vendor_name: string;
   recoverable_amount: number;
   row_index: number;
+  message: string;
+  source_analysis: SourceAnalysis;
   review_status: string;
   evidence: EvidenceItem[];
   trace: AgentTraceStep[];

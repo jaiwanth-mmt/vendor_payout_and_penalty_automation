@@ -19,6 +19,10 @@ AGENT_OUTPUT_COLUMNS = [
     "agent_recommended_action",
     "agent_review_reason",
     "agent_rationale",
+    "agent_source_used",
+    "agent_source_categories",
+    "agent_row_categories",
+    "agent_source_alignment_reason",
     "agent_evidence_ids",
     "agent_llm_error",
 ]
@@ -164,9 +168,11 @@ class ClaimCase:
     recoverable_amount: float
     row_index: int
     comments: str = ""
+    message: str = ""
     vendor_name: str = "Unknown vendor"
     evidence: list[EvidenceItem] = field(default_factory=list)
     trace: list[AgentTraceStep] = field(default_factory=list)
+    source_analysis: dict[str, Any] = field(default_factory=dict)
     specialist_decision: AgentDecision | None = None
     judge_decision: AgentDecision | None = None
 
@@ -192,6 +198,8 @@ class ClaimCase:
             "vendor_name": self.vendor_name,
             "recoverable_amount": round(self.recoverable_amount, 2),
             "row_index": self.row_index,
+            "message": clean_text(self.message or self.source_analysis.get("message")),
+            "source_analysis": json_safe(self.source_analysis),
             "review_status": self.review_status,
             "evidence": [item.to_dict() for item in self.evidence],
             "trace": [step.to_dict() for step in self.trace],
@@ -211,10 +219,15 @@ class ClaimCase:
                 "agent_recommended_action": "Review manually",
                 "agent_review_reason": "No agent decision was produced.",
                 "agent_rationale": "",
+                "agent_source_used": "",
+                "agent_source_categories": "",
+                "agent_row_categories": "",
+                "agent_source_alignment_reason": "",
                 "agent_evidence_ids": "",
                 "agent_llm_error": "",
             }
 
+        source_analysis = self.source_analysis
         return {
             "agent_review_status": decision.review_status,
             "agent_decision": decision.decision,
@@ -223,6 +236,10 @@ class ClaimCase:
             "agent_recommended_action": decision.recommended_action,
             "agent_review_reason": decision.review_reason,
             "agent_rationale": decision.rationale,
+            "agent_source_used": clean_text(source_analysis.get("source_label")),
+            "agent_source_categories": " + ".join(source_analysis.get("source_categories", [])),
+            "agent_row_categories": " + ".join(source_analysis.get("row_categories", [])),
+            "agent_source_alignment_reason": clean_text(source_analysis.get("reason")),
             "agent_evidence_ids": ", ".join(decision.evidence_ids),
             "agent_llm_error": decision.llm_error or "",
         }

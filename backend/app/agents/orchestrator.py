@@ -10,12 +10,12 @@ from backend.app.agents.evidence import EvidenceToolset
 from backend.app.agents.llm import (
     AgentLlmGenerator,
     build_portfolio_prompt,
-    categories_to_message,
     maybe_call_agent_llm,
     parse_json_object,
     validate_portfolio_payload,
 )
 from backend.app.agents.models import AGENT_OUTPUT_COLUMNS, AgentTraceStep, ClaimCase, clean_number, clean_text
+from backend.app.agents.source_alignment import build_source_alignment_async
 from backend.app.agents.specialists import (
     llm_error_label,
     run_judge_agent,
@@ -40,6 +40,7 @@ def build_claim_case(row: pd.Series, *, row_index: int) -> ClaimCase:
         recoverable_amount=clean_number(row.get("Recoverable")),
         row_index=row_index,
         comments=clean_text(row.get(COMMENTS_COLUMN)),
+        message=clean_text(row.get(MESSAGE_COLUMN)),
         vendor_name=vendor_name,
     )
 
@@ -110,6 +111,10 @@ async def investigate_category_frame_async(
                 summary=f"Created claim case for booking {case.booking_id or 'unknown'} in {case.sub_category}.",
             )
         )
+        if llm_generator is not None:
+            case.source_analysis = (
+                await build_source_alignment_async(case, llm_generator=llm_generator, semaphore=semaphore)
+            ).to_dict()
         evidence, trace = evidence_tools.gather_for_case(case)
         case.evidence.extend(evidence)
         case.trace.extend(trace)
@@ -143,14 +148,6 @@ def apply_case_result_to_output(output: pd.DataFrame, index: Any, case: ClaimCas
     for column, value in case.to_agent_columns().items():
         output.at[index, column] = value
 
-    decision = case.final_decision
-    if decision is None:
-        return
-
-    message = categories_to_message(decision.complaint_categories)
-    if message:
-        output.at[index, MESSAGE_COLUMN] = message
-
 
 def build_case_counts(cases: list[dict[str, Any]]) -> dict[str, int]:
     counts = Counter(case.get("review_status", "failed") for case in cases)
@@ -166,15 +163,24 @@ def build_case_counts(cases: list[dict[str, Any]]) -> dict[str, int]:
 
 def review_queue_row(case: dict[str, Any]) -> dict[str, Any]:
     decision = case.get("final_decision") or {}
+    source_analysis = case.get("source_analysis") or {}
     return {
         "booking_id": case.get("booking_id", ""),
         "sub_category": case.get("sub_category", ""),
+        "message": case.get("message", ""),
         "recoverable_amount": case.get("recoverable_amount", 0),
         "review_status": case.get("review_status", "failed"),
         "decision": decision.get("decision", ""),
         "confidence": decision.get("confidence", 0),
         "recommended_action": decision.get("recommended_action", ""),
         "review_reason": decision.get("review_reason", ""),
+        "rationale": decision.get("rationale", ""),
+        "source_used": source_analysis.get("source_label", ""),
+        "source_categories": join_categories(source_analysis.get("source_categories", [])),
+        "row_categories": join_categories(source_analysis.get("row_categories", [])),
+        "source_alignment_status": source_analysis.get("status", ""),
+        "source_alignment_reason": source_analysis.get("reason", ""),
+        "evidence_ids": ", ".join(decision.get("evidence_ids", [])),
     }
 
 
@@ -186,7 +192,7 @@ def build_agent_progress(
     total = len(cases)
     intake_missing_booking_ids = count_cases(cases, lambda case: not clean_text(case.get("booking_id")))
     evidence_error_cases = count_cases(cases, lambda case: any_evidence_status(case, "error"))
-    evidence_missing_cases = count_cases(cases, lambda case: any_evidence_status(case, "missing"))
+    evidence_missing_cases = count_cases(cases, lambda case: case.get("review_status") == "missing_evidence")
     missing_specialist_cases = count_cases(cases, lambda case: not case.get("specialist_decision"))
     specialist_error_cases = count_cases(
         cases,
@@ -304,6 +310,12 @@ def count_cases(cases: list[dict[str, Any]], predicate) -> int:
 
 def any_evidence_status(case: dict[str, Any], status: str) -> bool:
     return any(evidence.get("status") == status for evidence in case.get("evidence", []))
+
+
+def join_categories(value: Any) -> str:
+    if isinstance(value, list):
+        return " + ".join(clean_text(item) for item in value if clean_text(item))
+    return clean_text(value)
 
 
 def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:

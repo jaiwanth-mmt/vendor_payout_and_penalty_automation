@@ -92,7 +92,8 @@ def build_message_classification_prompt(*, sub_category: str, remarks: str, comm
             "Return only strict JSON in this exact shape: {\"categories\": [\"Category\"]}",
             "Do not return any category that is not in the allowed list.",
             "Use comments as the primary evidence when present. If comments are empty, use remarks.",
-            "Use Sub Category only as supporting context.",
+            "Use Sub Category only as supporting context; never let it override the primary evidence.",
+            "If the primary evidence does not map to an allowed category, return {\"categories\": []}.",
             (
                 "For cab delay, choose Cab Delayed > 1 Hour when the primary evidence says "
                 "the delay was more than 1 hour or more than 60 minutes."
@@ -119,6 +120,41 @@ def build_message_classification_prompt(*, sub_category: str, remarks: str, comm
     )
 
 
+def build_text_category_classification_prompt(*, source_label: str, text: str) -> str:
+    return "\n".join(
+        [
+            "Complaint category classification task.",
+            f"Classify the {source_label} text into one or more categories from the allowed list only.",
+            "Return only strict JSON in this exact shape: {\"categories\": [\"Category\"]}",
+            "Do not return any category that is not in the allowed list.",
+            "Handle casing differences, minor spelling mistakes, abbreviations, and local wording before deciding.",
+            (
+                "If the text is vague, operational, or cannot be mapped to an allowed category, "
+                "return {\"categories\": []}."
+            ),
+            (
+                "For cab delay, choose Cab Delayed > 1 Hour when the text says the delay was "
+                "more than 1 hour or more than 60 minutes."
+            ),
+            (
+                "For cab delay, choose Cab Delayed by 30-60 Minutes only when the text explicitly "
+                "says 30-60 minutes or a delay from 30 through 60 minutes."
+            ),
+            (
+                "Choose Cab Delayed > 15 Minutes only when the text explicitly says a delay "
+                "greater than 15 minutes and it is not a 30-60 minute or >1 hour window."
+            ),
+            "If cab delay is present without a clear matching duration window, choose Cab Delay.",
+            "For multiple complaint categories, include every matching allowed category.",
+            "",
+            "Allowed categories:",
+            json.dumps(ALLOWED_COMPLAINT_CATEGORIES, ensure_ascii=True),
+            "",
+            f"{source_label}: {text}",
+        ]
+    )
+
+
 def build_message_from_response(
     response: str,
     *,
@@ -133,8 +169,6 @@ def build_message_from_response(
         remarks=remarks,
         comments=comments,
     )
-    if not categories:
-        categories = fallback_message_categories(sub_category=sub_category, remarks=remarks, comments=comments)
     return format_message_categories(categories)
 
 
@@ -148,7 +182,7 @@ def parse_message_categories(response: str) -> list[str]:
     parsed = json.loads(extract_json_text(response))
     raw_categories: Any
     if isinstance(parsed, dict):
-        raw_categories = parsed.get("categories", [])
+        raw_categories = parsed.get("categories", parsed.get("complaint_categories", []))
         if isinstance(raw_categories, str):
             raw_categories = split_category_text(raw_categories)
     elif isinstance(parsed, list):
@@ -192,6 +226,24 @@ def split_category_text(value: str) -> list[str]:
 def canonicalize_category(value: object) -> str:
     key = normalize_category_key(value)
     return _CANONICAL_BY_KEY.get(key, "")
+
+
+def categories_from_message(value: object) -> list[str]:
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return []
+
+    if text.startswith("{") or text.startswith("[") or text.startswith("```"):
+        try:
+            return parse_message_categories(text)
+        except Exception:
+            pass
+
+    return ordered_unique_categories(
+        category
+        for part in split_category_text(text)
+        if (category := canonicalize_category(part))
+    )
 
 
 def normalize_cab_delay_selection(

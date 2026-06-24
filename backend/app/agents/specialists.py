@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from backend.app.agents.llm import (
@@ -15,18 +14,17 @@ from backend.app.agents.llm import (
     parse_json_object,
 )
 from backend.app.agents.models import AgentDecision, AgentTraceStep, CaseReviewStatus, ClaimCase, clean_text
-from backend.app.domain.complaint_message import build_fallback_message
+from backend.app.agents.source_alignment import build_source_alignment, build_source_alignment_async, format_categories
 
 
 CAB_DELAY_CATEGORY = "Cab Delay"
 EXTRA_MONEY_TAKEN_CATEGORY = "Extra Money Taken"
 FULFILLMENT_NOT_DONE_CATEGORY = "FULFILLMENT NOT DONE"
 LOWER_CATEGORY_VEHICLE_CATEGORY = "Lower Category Vehicle"
-SOURCE_HIERARCHY = ("comments", "remarks", "sub_category")
+SOURCE_HIERARCHY = ("comments", "remarks")
 SOURCE_LABELS = {
     "comments": "comments",
     "remarks": "Remarks",
-    "sub_category": "Sub Category",
 }
 SOURCE_CONFIDENCE = {
     "comments": 0.93,
@@ -64,6 +62,10 @@ async def run_specialist_agent_async(
     llm_generator: AgentLlmGenerator | None,
     semaphore,
 ) -> None:
+    if llm_generator is not None and not case.source_analysis:
+        case.source_analysis = (
+            await build_source_alignment_async(case, llm_generator=llm_generator, semaphore=semaphore)
+        ).to_dict()
     fallback_decision, fallback_trace = build_specialist_decision(case)
     if llm_generator is None:
         case.specialist_decision = fallback_decision
@@ -92,6 +94,7 @@ async def run_specialist_agent_async(
             default_agent=fallback_decision.agent,
             max_recovery_amount=case.recoverable_amount,
         )
+        decision = apply_source_categories(case, decision)
         case.specialist_decision = decision
         case.trace.append(
             AgentTraceStep(
@@ -124,50 +127,53 @@ async def run_specialist_agent_async(
 
 
 def build_specialist_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    return source_hierarchy_agent(case)
+    return source_alignment_agent(case)
 
 
-def source_hierarchy_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
+def source_alignment_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
+    analysis = ensure_source_analysis(case)
     source = primary_source(case)
     if source is None:
         decision = make_decision(
-            agent="Source Hierarchy Agent",
+            agent="Source Alignment Agent",
             decision="needs_review",
             categories=[],
             confidence=0.35,
             amount=0,
-            rationale="Agent review could not find comments, Remarks, or Sub Category text.",
+            rationale=clean_text(analysis.get("reason")) or "Agent review could not find comments or Remarks.",
             status="missing_evidence",
-            reason="No comments, Remarks, or Sub Category text was available for agent review.",
+            reason=clean_text(analysis.get("reason")) or "No comments or Remarks were available for agent review.",
             evidence_ids=[],
         )
         return decision, [
             AgentTraceStep(
-                agent="Source Hierarchy Agent",
-                action="apply_source_hierarchy",
+                agent="Source Alignment Agent",
+                action="apply_source_alignment",
                 status="warning",
                 summary=decision.review_reason,
                 evidence_ids=[],
-                metadata={"source_priority": list(SOURCE_HIERARCHY)},
+                metadata={"source_priority": list(SOURCE_HIERARCHY), "source_alignment_status": "missing_evidence"},
             )
         ]
 
-    source_field, source_label, source_text, evidence_id = source
-    categories = categories_from_source(source_field, source_text)
+    source_field, source_label, _source_text, evidence_id = source
+    categories = list(analysis.get("source_categories") or [])
     agent_name = agent_name_for_categories(categories)
-    if contradiction_detected(case):
+    alignment_status = clean_text(analysis.get("status"))
+    if clean_text(analysis.get("review_status")) != "auto_ready":
         confidence = 0.55
         status: CaseReviewStatus = "needs_review"
         decision_value = "needs_review"
-        reason = f"{source_label} contains a possible contradiction or invalid-penalty signal."
+        reason = clean_text(analysis.get("reason")) or f"{source_label} did not align with row context."
     else:
         confidence = SOURCE_CONFIDENCE[source_field]
         status = "auto_ready"
         decision_value = "valid_penalty"
-        reason = f"{source_label} was selected by the comments -> Remarks -> Sub Category hierarchy."
+        reason = clean_text(analysis.get("reason")) or f"{source_label} aligns with row context."
 
     rationale = (
-        f"Agent used only {source_label} for this decision under the configured source hierarchy."
+        f"Agent compared {source_label} categories ({format_categories(categories)}) "
+        f"with row categories ({format_categories(list(analysis.get('row_categories') or []))})."
     )
     decision = make_decision(
         agent=agent_name,
@@ -183,11 +189,15 @@ def source_hierarchy_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTr
     trace = [
         AgentTraceStep(
             agent=agent_name,
-            action="apply_source_hierarchy",
+            action="apply_source_alignment",
             status="completed" if status == "auto_ready" else "warning",
-            summary=rationale,
+            summary=reason,
             evidence_ids=[evidence_id],
-            metadata={"selected_source": source_field, "source_priority": list(SOURCE_HIERARCHY)},
+            metadata={
+                "primary_source": source_field,
+                "source_alignment_status": alignment_status,
+                "source_priority": list(SOURCE_HIERARCHY),
+            },
         )
     ]
     return decision, trace
@@ -205,6 +215,10 @@ async def run_judge_agent_async(
     llm_generator: AgentLlmGenerator | None,
     semaphore,
 ) -> None:
+    if llm_generator is not None and not case.source_analysis:
+        case.source_analysis = (
+            await build_source_alignment_async(case, llm_generator=llm_generator, semaphore=semaphore)
+        ).to_dict()
     fallback_decision, fallback_trace = build_judge_decision(case)
     specialist = case.specialist_decision
     if llm_generator is None or specialist is None:
@@ -234,6 +248,7 @@ async def run_judge_agent_async(
             default_agent="Judge Agent",
             max_recovery_amount=case.recoverable_amount,
         )
+        decision = apply_source_categories(case, decision)
         decision = apply_judge_guardrails(case, decision)
         case.judge_decision = decision
         case.trace.append(
@@ -282,7 +297,7 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTrac
         )
         return decision, []
 
-    missing_evidence = [item for item in case.evidence if item.status == "missing"]
+    analysis = ensure_source_analysis(case)
     evidence_ids = specialist.evidence_ids
     review_status: CaseReviewStatus = specialist.review_status
     confidence = specialist.confidence
@@ -292,19 +307,22 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTrac
     if critical_missing(case):
         review_status = "missing_evidence"
         confidence = min(confidence, 0.58)
-        reason = "Judge routed to review because comments, Remarks, and Sub Category are unavailable."
-    elif contradiction_detected(case):
-        review_status = "contradiction"
-        confidence = min(confidence, 0.7)
-        reason = "Judge found a possible contradiction in the selected source text."
+        reason = (
+            clean_text(analysis.get("reason"))
+            or "Judge routed to review because comments and Remarks are unavailable."
+        )
+    elif source_alignment_needs_review(case):
+        review_status = "needs_review"
+        confidence = min(confidence, 0.75)
+        reason = clean_text(analysis.get("reason")) or "Judge routed to review because source categories do not align."
     elif evidence_ids:
         review_status = "auto_ready"
         confidence = max(confidence, 0.86)
         amount = case.recoverable_amount
-        reason = "Judge approved: specialist decision is supported by the selected source text."
+        reason = clean_text(analysis.get("reason")) or "Judge approved: primary source aligns with row context."
     else:
         review_status = "needs_review"
-        reason = "Judge routed to review because no selected source evidence ID was cited."
+        reason = "Judge routed to review because no source evidence ID was cited."
 
     decision = make_decision(
         agent="Judge Agent",
@@ -324,7 +342,10 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTrac
             status="completed" if review_status == "auto_ready" else "warning",
             summary=reason,
             evidence_ids=evidence_ids,
-            metadata={"missing_source_count": len(missing_evidence), "confidence": confidence},
+            metadata={
+                "source_alignment_status": clean_text(analysis.get("status")),
+                "confidence": confidence,
+            },
         )
     ]
     return decision, trace
@@ -360,6 +381,26 @@ def make_decision(
     )
 
 
+def apply_source_categories(case: ClaimCase, decision: AgentDecision) -> AgentDecision:
+    categories = list(ensure_source_analysis(case).get("source_categories") or [])
+    if not categories:
+        return decision
+    return AgentDecision(
+        agent=decision.agent,
+        decision=decision.decision,
+        complaint_categories=categories,
+        confidence=decision.confidence,
+        recommended_recovery_amount=decision.recommended_recovery_amount,
+        rationale=decision.rationale,
+        recommended_action=decision.recommended_action,
+        review_status=decision.review_status,
+        review_reason=decision.review_reason,
+        evidence_ids=decision.evidence_ids,
+        decision_source=decision.decision_source,
+        llm_error=decision.llm_error,
+    )
+
+
 def action_for_status(status: CaseReviewStatus) -> str:
     if status == "auto_ready":
         return "Ready for Cab Ops recovery package"
@@ -373,6 +414,19 @@ def action_for_status(status: CaseReviewStatus) -> str:
 
 
 def primary_source(case: ClaimCase) -> tuple[str, str, str, str] | None:
+    analysis = ensure_source_analysis(case)
+    source_field = clean_text(analysis.get("primary_source"))
+    if source_field not in SOURCE_HIERARCHY:
+        return None
+
+    source_text = clean_text(analysis.get("source_text"))
+    evidence_id = clean_text(analysis.get("source_evidence_id")) or f"{case.booking_id}:{source_field}"
+    if not source_text:
+        return None
+    return source_field, SOURCE_LABELS[source_field], source_text, evidence_id
+
+
+def primary_source_from_evidence(case: ClaimCase) -> tuple[str, str, str, str] | None:
     evidence_by_source: dict[str, tuple[str, str]] = {}
     for item in case.evidence:
         if item.status != "available":
@@ -414,41 +468,25 @@ def source_from_evidence_id(evidence_id: str) -> str:
     return ""
 
 
-def categories_from_source(source_field: str, source_text: str) -> list[str]:
-    message = build_fallback_message(
-        sub_category=source_text if source_field == "sub_category" else "",
-        remarks=source_text if source_field == "remarks" else "",
-        comments=source_text if source_field == "comments" else "",
-    )
-    return [category.strip() for category in message.split(" + ") if category.strip()]
-
-
 def agent_name_for_categories(categories: list[str]) -> str:
     if not categories:
-        return "Source Hierarchy Agent"
-    return AGENT_BY_CATEGORY.get(categories[0], "Source Hierarchy Agent")
+        return "Source Alignment Agent"
+    return AGENT_BY_CATEGORY.get(categories[0], "Source Alignment Agent")
 
 
 def critical_missing(case: ClaimCase) -> bool:
-    return primary_source(case) is None
+    analysis = ensure_source_analysis(case)
+    return clean_text(analysis.get("review_status")) == "missing_evidence"
 
 
 def contradiction_detected(case: ClaimCase) -> bool:
-    source = primary_source(case)
-    if source is None:
-        return False
-    _source_field, _source_label, source_text, _evidence_id = source
-    return bool(
-        re.search(
-            (
-                r"\b(no complaint|no issue|issue resolved|complaint resolved|wrong penalty|"
-                r"incorrect penalty|false claim|invalid penalty|penalty not valid|not genuine|"
-                r"customer denied|denied complaint)\b"
-            ),
-            source_text,
-            re.I,
-        )
-    )
+    analysis = ensure_source_analysis(case)
+    return clean_text(analysis.get("status")) == "invalid_signal"
+
+
+def source_alignment_needs_review(case: ClaimCase) -> bool:
+    analysis = ensure_source_analysis(case)
+    return clean_text(analysis.get("review_status")) == "needs_review"
 
 
 def apply_judge_guardrails(case: ClaimCase, decision: AgentDecision) -> AgentDecision:
@@ -457,14 +495,16 @@ def apply_judge_guardrails(case: ClaimCase, decision: AgentDecision) -> AgentDec
             decision,
             review_status="missing_evidence",
             confidence_cap=0.58,
-            reason="Judge guardrail routed to review because comments, Remarks, and Sub Category are unavailable.",
+            reason=clean_text(ensure_source_analysis(case).get("reason"))
+            or "Judge guardrail routed to review because comments and Remarks are unavailable.",
         )
-    if contradiction_detected(case):
+    if source_alignment_needs_review(case):
         return apply_guardrail_status(
             decision,
-            review_status="contradiction",
-            confidence_cap=0.7,
-            reason="Judge guardrail found a possible contradiction in the selected source text.",
+            review_status="needs_review",
+            confidence_cap=0.75,
+            reason=clean_text(ensure_source_analysis(case).get("reason"))
+            or "Judge guardrail routed to review because source categories do not align.",
         )
     if not decision.evidence_ids:
         return apply_guardrail_status(
@@ -486,7 +526,8 @@ def promote_to_auto_ready(decision: AgentDecision, case: ClaimCase) -> AgentDeci
         rationale=decision.rationale,
         recommended_action=action_for_status("auto_ready"),
         review_status="auto_ready",
-        review_reason="Judge approved: selected source text is present and has no explicit invalid-penalty signal.",
+        review_reason=clean_text(ensure_source_analysis(case).get("reason"))
+        or "Judge approved: primary source aligns with row context.",
         evidence_ids=decision.evidence_ids,
         decision_source=decision.decision_source,
         llm_error=decision.llm_error,
@@ -495,11 +536,13 @@ def promote_to_auto_ready(decision: AgentDecision, case: ClaimCase) -> AgentDeci
 
 def guardrail_payload(case: ClaimCase) -> dict[str, Any]:
     source = primary_source(case)
+    analysis = ensure_source_analysis(case)
     return {
         "critical_missing": critical_missing(case),
-        "possible_contradiction": contradiction_detected(case),
+        "requires_review": source_alignment_needs_review(case),
         "source_priority": list(SOURCE_HIERARCHY),
         "selected_source": source[0] if source else "",
+        "source_alignment": analysis,
         "available_evidence_ids": source_evidence_ids(case),
         "missing_evidence_ids": [item.id for item in case.evidence if item.status == "missing"],
         "error_evidence_ids": [item.id for item in case.evidence if item.status == "error"],
@@ -511,8 +554,28 @@ def case_evidence_ids(case: ClaimCase) -> set[str]:
 
 
 def source_evidence_ids(case: ClaimCase) -> list[str]:
-    source = primary_source(case)
-    return [source[3]] if source else []
+    evidence_ids: list[str] = []
+    for item in case.evidence:
+        source_field = clean_text(item.fields.get("source_field")) or source_from_evidence_id(item.id)
+        if item.source == "source_alignment" or source_field in {
+            "comments",
+            "remarks",
+            "sub_category",
+            "source_alignment",
+        }:
+            if item.id not in evidence_ids:
+                evidence_ids.append(item.id)
+    if not evidence_ids:
+        source = primary_source(case)
+        if source:
+            evidence_ids.append(source[3])
+    return evidence_ids
+
+
+def ensure_source_analysis(case: ClaimCase) -> dict[str, Any]:
+    if not case.source_analysis:
+        case.source_analysis = build_source_alignment(case).to_dict()
+    return case.source_analysis
 
 
 def llm_error_label(error: Exception) -> str:
