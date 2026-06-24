@@ -21,6 +21,7 @@ from backend.app.domain.category_processors import (
     LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS,
     enrich_cab_delay_insights_async,
     enrich_lower_category_vehicle_async,
+    enrich_message_column,
     enrich_message_column_async,
     process_category_batch,
 )
@@ -152,6 +153,98 @@ def test_async_message_classification_respects_concurrency_limit() -> None:
     assert max_seen == 2
     assert token_budgets == [2048] * 4
     assert output[MESSAGE_COLUMN].tolist() == ["Extra Money Taken"] * 4
+
+
+def test_message_classification_repairs_empty_first_response_for_non_cab_category() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B8",
+                "Sub Category": "AC not working",
+                "Remarks": "AC not working",
+                COMMENTS_COLUMN: "Customer said the car air conditioner was not working during the ride.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    def llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return '{"categories": []}'
+        return '{"categories": ["AC Not Working"]}'
+
+    output = enrich_message_column(df, llm_generator=llm)
+
+    assert output.loc[0, MESSAGE_COLUMN] == "AC Not Working"
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
+
+
+def test_async_message_classification_repairs_unmappable_first_response_for_non_cab_category() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B9",
+                "Sub Category": "Vehicle Condition",
+                "Remarks": "dirty vehicle",
+                COMMENTS_COLUMN: "Customer reported the cab was dirty and smelled bad.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    async def async_llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        await asyncio.sleep(0)
+        if len(prompts) == 1:
+            return '{"categories": ["Cab Cleanliness"]}'
+        return '{"categories": ["Poor Vehicle Condition"]}'
+
+    async def run() -> pd.DataFrame:
+        return await enrich_message_column_async(
+            df,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+
+    output = asyncio.run(run())
+
+    assert output.loc[0, MESSAGE_COLUMN] == "Poor Vehicle Condition"
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
+
+
+def test_async_message_classification_leaves_blank_after_failed_repair() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B10",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra",
+                COMMENTS_COLUMN: "Customer said driver collected extra cash.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    async def async_llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        await asyncio.sleep(0)
+        return "not json"
+
+    async def run() -> pd.DataFrame:
+        return await enrich_message_column_async(
+            df,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+
+    output = asyncio.run(run())
+
+    assert output.loc[0, MESSAGE_COLUMN] == ""
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
 
 
 def test_async_lower_category_vehicle_extraction_uses_large_default_token_budget() -> None:
