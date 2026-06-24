@@ -21,6 +21,7 @@ from backend.app.domain.complaint_message import MESSAGE_COLUMN
 from backend.app.domain.tracking_common import (
     COMPLAINT_AGAINST_VALUE,
     TITLE_VALUE,
+    VENDOR_NAME_COLUMN,
 )
 from backend.app.services import pipeline
 from backend.app.services.pipeline import CAB_DELAY_OUTPUT_COLUMNS, process_uploaded_workbook
@@ -72,7 +73,24 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert package_path.exists()
     assert result.case_counts["total_cases"] == 1
     assert result.agent_summary["case_counts"]["total_cases"] == 1
+    assert result.agent_summary["top_vendors_by_penalty"] == [
+        {
+            "vendor_name": "savaari",
+            "case_count": 1,
+            "total_recoverable": 150,
+            "top_subcategories": [
+                {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+            ],
+        }
+    ]
+    assert result.agent_summary["top_subcategories_by_penalty"] == [
+        {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+    ]
+    assert result.agent_summary["top_subcategories_by_count"] == [
+        {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+    ]
     assert result.agent_cases[0]["booking_id"] == "B1"
+    assert result.agent_cases[0]["vendor_name"] == "savaari"
     assert result.agent_cases[0]["final_decision"]["agent"] == "Judge Agent"
     assert result.final_output == {
         "filename": "final_output.xlsx",
@@ -102,6 +120,7 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert output_df.loc[0, "cash_collected"] == 1000
     assert output_df.loc[0, "extra_travelled_fare"] == 40
     assert output_df.loc[0, "total_driver_charge"] == 150
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "savaari"
     assert "preferred start time of customer (UTC)" not in output_df.columns
     assert output_df.loc[0, PREFERRED_START_TIME_IST_COLUMN] == "19 Mar 2026 10:00 AM"
     assert output_df.loc[0, DRIVER_STARTED_COLUMN] == "19 Mar 2026 10:20 AM"
@@ -247,6 +266,7 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
     assert result.metrics["category_count"] == 9
     assert result.metrics["final_output_rows"] == 71
     assert result.final_output["row_count"] == 71
+    assert all(VENDOR_NAME_COLUMN in category["output_columns"] for category in result.category_outputs)
     assert package_path.exists()
     final_output_df = pd.read_excel(result.final_output_path, keep_default_na=False)
     assert final_output_df.columns.tolist() == pipeline.FINAL_EXPORT_COLUMNS

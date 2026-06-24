@@ -38,6 +38,7 @@ from backend.app.domain.lower_category_vehicle import (
     VEHICLE_SUBCATEGORY_COLUMN,
     VEHICLE_TYPE_COLUMN,
 )
+from backend.app.domain.tracking_common import VENDOR_NAME_COLUMN
 from backend.app.domain.subcategories import CategoryBatch
 from backend.app.services.pipeline import process_uploaded_workbook
 from backend.tests.factories import (
@@ -227,6 +228,7 @@ def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> 
     assert output_df.loc[0, "cash_collected"] == 1000
     assert output_df.loc[0, "extra_travelled_fare"] == 90
     assert output_df.loc[0, "airport_entry_fee"] == 200
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "taxibazaar"
     assert output_df.loc[0, "comments"] == "Customer said driver collected extra cash for toll and parking."
     assert output_df.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
     assert extra_money_category["output_columns"] == EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS
@@ -268,6 +270,7 @@ def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_pat
     assert output_df.loc[0, "amount_paid"] == 566
     assert output_df.loc[0, "route_toll_charges"] == 80
     assert output_df.loc[0, "airport_entry_fee"] == 200
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "rideally"
     assert output_df.loc[0, COMMENTS_COLUMN] == "Customer said the assigned cab did not arrive for the airport pickup."
     assert output_df.loc[0, FULFILLMENT_PREFERRED_START_TIME_COLUMN] == "19 Mar 2026 3:15 AM"
     assert output_df.loc[0, FULFILLMENT_DRIVER_STARTED_COLUMN] == "19 Mar 2026 3:21:38 AM"
@@ -312,6 +315,7 @@ def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_pa
     assert output_df.loc[0, "driver_charge_per_day"] == 170
     assert output_df.loc[0, VEHICLE_SUBCATEGORY_COLUMN] == "basic-electric"
     assert output_df.loc[0, VEHICLE_TYPE_COLUMN] == "sedan"
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "wticabs"
     assert output_df.loc[0, COMMENTS_COLUMN] == (
         "Customer booked an electric sedan but received a CNG hatchback instead."
     )
@@ -408,6 +412,7 @@ def test_extra_money_processor_adds_tracking_fields_without_cab_columns() -> Non
                     "type": "LOCAL_RENTAL",
                     "ttrip_type": "local",
                     "amount": 840,
+                    "vendor_name": "quickride",
                     "base_amount": 800,
                     "amount_paid": 200,
                     "cash_collected": 640,
@@ -439,6 +444,7 @@ def test_extra_money_processor_adds_tracking_fields_without_cab_columns() -> Non
 
     assert outcome.df.columns.tolist() == EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS
     assert outcome.df.loc[0, "type"] == "LOCAL_RENTAL"
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "quickride"
     assert outcome.df.loc[0, "extra_travelled"] == 8.11
     assert outcome.df.loc[0, "comments"] == "Customer disputed extra cash collection."
     assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
@@ -467,6 +473,7 @@ def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insight
                     "dispatch_id": "dispatch-b6",
                     "booking_status": "CONFIRMED",
                     "tracking_status": "NOT BOARDED",
+                    "vendor_name": "rideally",
                     "start_time": "2026-03-18 21:45:00",
                     "driver_started": "2026-03-19 03:21:38.764000",
                     "driver_arrived": "2026-03-19 03:21:44.001000",
@@ -484,6 +491,7 @@ def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insight
 
     assert outcome.df.columns.tolist() == FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b6")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "rideally"
     assert outcome.df.loc[0, BOOKING_STATUS_COLUMN] == "CONFIRMED"
     assert outcome.df.loc[0, TRACKING_STATUS_COLUMN] == "NOT BOARDED"
     assert outcome.df.loc[0, COMMENTS_COLUMN] == "Customer said the cab did not arrive."
@@ -515,6 +523,7 @@ def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_c
             "tracking_reports_raw": [
                 {
                     "dispatch_id": "dispatch-b7",
+                    "vendor_name": "wticabs",
                     "vehicle_subcategory": "basic-electric",
                     "vehicle_type": "sedan",
                 }
@@ -531,6 +540,7 @@ def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_c
 
     assert outcome.df.columns.tolist() == LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b7")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "wticabs"
     assert outcome.df.loc[0, VEHICLE_SUBCATEGORY_COLUMN] == "basic-electric"
     assert outcome.df.loc[0, VEHICLE_TYPE_COLUMN] == "sedan"
     assert outcome.df.loc[0, COMMENTS_COLUMN] == (
@@ -565,6 +575,7 @@ def test_other_category_processors_add_common_tracking_amount_fields() -> None:
             "tracking_reports_raw": [
                 {
                     "dispatch_id": "dispatch-b3",
+                    "vendor_name": "savaari",
                     "amount": 980,
                     "base_amount": 900,
                     "amount_paid": 100,
@@ -596,6 +607,7 @@ def test_other_category_processors_add_common_tracking_amount_fields() -> None:
 
     assert outcome.df.columns.tolist() == COMMON_PROCESSED_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b3")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "savaari"
     assert outcome.df.loc[0, "amount"] == 980
     assert outcome.df.loc[0, "cash_collected"] == 880
     assert outcome.df.loc[0, "extra_travelled_fare"] == 66

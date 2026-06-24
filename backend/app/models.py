@@ -96,6 +96,9 @@ class AgentSummary(BaseModel):
     high_confidence_recoverable_amount: float = 0
     top_complaint_drivers: list[str] = Field(default_factory=list)
     category_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    top_vendors_by_penalty: list[dict[str, Any]] = Field(default_factory=list)
+    top_subcategories_by_penalty: list[dict[str, Any]] = Field(default_factory=list)
+    top_subcategories_by_count: list[dict[str, Any]] = Field(default_factory=list)
     missing_data_hotspots: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
 

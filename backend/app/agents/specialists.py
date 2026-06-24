@@ -14,14 +14,42 @@ from backend.app.agents.llm import (
     maybe_call_agent_llm,
     parse_json_object,
 )
-from backend.app.agents.models import AgentDecision, AgentTraceStep, CaseReviewStatus, ClaimCase, clean_number, clean_text
-from backend.app.domain.complaint_message import build_fallback_message, classify_cab_delay_window
+from backend.app.agents.models import AgentDecision, AgentTraceStep, CaseReviewStatus, ClaimCase, clean_text
+from backend.app.domain.complaint_message import build_fallback_message
 
 
 CAB_DELAY_CATEGORY = "Cab Delay"
 EXTRA_MONEY_TAKEN_CATEGORY = "Extra Money Taken"
 FULFILLMENT_NOT_DONE_CATEGORY = "FULFILLMENT NOT DONE"
 LOWER_CATEGORY_VEHICLE_CATEGORY = "Lower Category Vehicle"
+SOURCE_HIERARCHY = ("comments", "remarks", "sub_category")
+SOURCE_LABELS = {
+    "comments": "comments",
+    "remarks": "Remarks",
+    "sub_category": "Sub Category",
+}
+SOURCE_CONFIDENCE = {
+    "comments": 0.93,
+    "remarks": 0.89,
+    "sub_category": 0.86,
+}
+AGENT_BY_CATEGORY = {
+    "Cab Delay": "Cab Delay Agent",
+    "Cab Delayed > 15 Minutes": "Cab Delay Agent",
+    "Cab Delayed by 30-60 Minutes": "Cab Delay Agent",
+    "Cab Delayed > 1 Hour": "Cab Delay Agent",
+    "Extra Money Taken": "Extra Money Taken Agent",
+    "Vendor No Show": "Fulfillment Not Done Agent",
+    "Low Category Vehicle": "Lower Category Vehicle Agent",
+    "AC Not Working": "AC Not Working Agent",
+    "Accident on the Way": "Accident Review Agent",
+    "Bad Driver Behaviour/Skill": "Driver Behavior Agent",
+    "Cab Breakdown": "Cab Breakdown Agent",
+    "Chauffeur/Vehicle Change": "Details Change Agent",
+    "Drunk Driver": "Driver Behavior Agent",
+    "Poor Vehicle Condition": "Vehicle Condition Agent",
+    "White Number Plate": "White Number Plate Agent",
+}
 
 
 def run_specialist_agent(case: ClaimCase) -> None:
@@ -96,285 +124,70 @@ async def run_specialist_agent_async(
 
 
 def build_specialist_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    normalized_category = case.sub_category.strip().casefold()
-    if normalized_category == CAB_DELAY_CATEGORY.casefold():
-        decision, trace = cab_delay_agent(case)
-    elif normalized_category == EXTRA_MONEY_TAKEN_CATEGORY.casefold():
-        decision, trace = extra_money_agent(case)
-    elif normalized_category == FULFILLMENT_NOT_DONE_CATEGORY.casefold():
-        decision, trace = fulfillment_agent(case)
-    elif normalized_category == LOWER_CATEGORY_VEHICLE_CATEGORY.casefold():
-        decision, trace = lower_category_vehicle_agent(case)
+    return source_hierarchy_agent(case)
+
+
+def source_hierarchy_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
+    source = primary_source(case)
+    if source is None:
+        decision = make_decision(
+            agent="Source Hierarchy Agent",
+            decision="needs_review",
+            categories=[],
+            confidence=0.35,
+            amount=0,
+            rationale="Agent review could not find comments, Remarks, or Sub Category text.",
+            status="missing_evidence",
+            reason="No comments, Remarks, or Sub Category text was available for agent review.",
+            evidence_ids=[],
+        )
+        return decision, [
+            AgentTraceStep(
+                agent="Source Hierarchy Agent",
+                action="apply_source_hierarchy",
+                status="warning",
+                summary=decision.review_reason,
+                evidence_ids=[],
+                metadata={"source_priority": list(SOURCE_HIERARCHY)},
+            )
+        ]
+
+    source_field, source_label, source_text, evidence_id = source
+    categories = categories_from_source(source_field, source_text)
+    agent_name = agent_name_for_categories(categories)
+    if contradiction_detected(case):
+        confidence = 0.55
+        status: CaseReviewStatus = "needs_review"
+        decision_value = "needs_review"
+        reason = f"{source_label} contains a possible contradiction or invalid-penalty signal."
     else:
-        decision, trace = generic_complaint_agent(case)
-
-    return decision, trace
-
-
-def cab_delay_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    timing = evidence_fields(case, "timing")
-    comments = evidence_fields(case, "comments").get("comments", "")
-    delay_minutes = first_number(
-        timing.get("boarded_after_pickup_minutes"),
-        timing.get("driver_arrived_after_pickup_minutes"),
-        timing.get("driver_started_after_pickup_minutes"),
-    )
-    has_tracking = evidence_status(case, "tracking") == "available"
-    has_comments = bool(clean_text(comments))
-    text_window = classify_cab_delay_window(" ".join([case.remarks, clean_text(comments)]))
-    evidence_ids = available_ids(case, ["penalty", "timing", "comments"])
-
-    if not has_tracking:
-        confidence = 0.58 if has_comments else 0.35
-        status: CaseReviewStatus = "missing_evidence"
-        reason = "Tracking timing evidence is missing."
-    elif delay_minutes is not None and delay_minutes > 15:
-        confidence = 0.92 if has_comments else 0.86
+        confidence = SOURCE_CONFIDENCE[source_field]
         status = "auto_ready"
-        reason = "Tracking supports delay beyond the operational threshold."
-    elif text_window != "Cab Delay" and has_comments:
-        confidence = 0.74
-        status = "needs_review"
-        reason = "Customer comment reports delay, but tracking delay threshold is not fully supported."
-    else:
-        confidence = 0.61 if has_comments else 0.52
-        status = "needs_review"
-        reason = "Cab delay evidence is partial."
+        decision_value = "valid_penalty"
+        reason = f"{source_label} was selected by the comments -> Remarks -> Sub Category hierarchy."
 
-    category = text_window if text_window else "Cab Delay"
-    rationale = build_sentence(
-        [
-            f"Cab delay investigation selected {category}.",
-            f"Observed delay was {delay_minutes:g} minutes." if delay_minutes is not None else "",
-            "Customer comments are available." if has_comments else "Customer comments are unavailable.",
-        ]
-    )
-    decision = make_decision(
-        agent="Cab Delay Agent",
-        decision="valid_penalty" if confidence >= 0.7 else "needs_review",
-        categories=[category],
-        confidence=confidence,
-        amount=case.recoverable_amount,
-        rationale=rationale,
-        status=status,
-        reason=reason,
-        evidence_ids=evidence_ids,
-    )
-    trace = [
-        AgentTraceStep(
-            agent="Cab Delay Agent",
-            action="compare_pickup_timeline",
-            status="completed" if has_tracking else "warning",
-            summary=rationale,
-            evidence_ids=evidence_ids,
-            metadata={"delay_minutes": delay_minutes, "text_window": category},
-        )
-    ]
-    return decision, trace
-
-
-def extra_money_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    comments = clean_text(evidence_fields(case, "comments").get("comments", ""))
-    fare = evidence_fields(case, "fare")
-    has_comment_signal = bool(re.search(r"\b(extra|cash|collect|charged|parking|toll|overcharg)", comments, re.I))
-    charge_fields = [
-        "cash_collected",
-        "route_toll_charges",
-        "toll_charges",
-        "parking_charges",
-        "airport_entry_fee",
-        "extra_travelled_fare",
-        "waiting_charges",
-    ]
-    populated_charge_fields = [field for field in charge_fields if clean_text(fare.get(field))]
-    evidence_ids = available_ids(case, ["penalty", "comments", "fare"])
-
-    if has_comment_signal and populated_charge_fields:
-        confidence = 0.9
-        status: CaseReviewStatus = "auto_ready"
-        reason = "Customer comment and fare/payment evidence both support an extra-money claim."
-    elif has_comment_signal:
-        confidence = 0.72
-        status = "needs_review"
-        reason = "Customer comment supports extra-money claim, but fare/payment evidence is incomplete."
-    elif populated_charge_fields:
-        confidence = 0.62
-        status = "needs_review"
-        reason = "Fare/payment fields exist, but customer comment support is missing."
-    else:
-        confidence = 0.38
-        status = "missing_evidence"
-        reason = "No extra-money comment or fare/payment evidence was available."
-
-    rationale = build_sentence(
-        [
-            "Extra Money Taken investigation reviewed customer comments and fare/payment fields.",
-            f"Charge fields available: {', '.join(populated_charge_fields)}." if populated_charge_fields else "",
-        ]
-    )
-    decision = make_decision(
-        agent="Extra Money Taken Agent",
-        decision="valid_penalty" if confidence >= 0.85 else "needs_review",
-        categories=["Extra Money Taken"],
-        confidence=confidence,
-        amount=case.recoverable_amount,
-        rationale=rationale,
-        status=status,
-        reason=reason,
-        evidence_ids=evidence_ids,
-    )
-    trace = [
-        AgentTraceStep(
-            agent="Extra Money Taken Agent",
-            action="compare_comments_with_fare_evidence",
-            status="completed" if evidence_ids else "warning",
-            summary=rationale,
-            evidence_ids=evidence_ids,
-            metadata={"charge_fields": populated_charge_fields},
-        )
-    ]
-    return decision, trace
-
-
-def fulfillment_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    status_fields = evidence_fields(case, "status")
-    timing = evidence_fields(case, "timing")
-    comments = clean_text(evidence_fields(case, "comments").get("comments", ""))
-    status_text = " ".join(clean_text(value) for value in status_fields.values())
-    comment_signal = bool(re.search(r"\b(no show|not arrive|did not arrive|not boarded|unfulfill)", comments, re.I))
-    status_signal = bool(re.search(r"\b(not boarded|unfulfilled|no show|cancel)", status_text, re.I))
-    has_timing = any(clean_text(timing.get(field)) for field in ["driver_started_ist", "driver_arrived_ist"])
-    evidence_ids = available_ids(case, ["penalty", "status", "timing", "comments"])
-
-    if status_signal and comment_signal:
-        confidence = 0.91
-        review_status: CaseReviewStatus = "auto_ready"
-        reason = "Tracking status and customer comment both support fulfillment failure."
-    elif status_signal or comment_signal:
-        confidence = 0.73 if has_timing else 0.66
-        review_status = "needs_review"
-        reason = "Fulfillment failure evidence is present but not fully corroborated."
-    else:
-        confidence = 0.42
-        review_status = "missing_evidence"
-        reason = "No clear fulfillment failure signal was found."
-
-    rationale = build_sentence(
-        [
-            "Fulfillment agent checked booking status, tracking status, driver movement, and comments.",
-            f"Status evidence: {status_text}." if status_text else "",
-        ]
-    )
-    decision = make_decision(
-        agent="Fulfillment Not Done Agent",
-        decision="valid_penalty" if confidence >= 0.85 else "needs_review",
-        categories=["Vendor No Show"],
-        confidence=confidence,
-        amount=case.recoverable_amount,
-        rationale=rationale,
-        status=review_status,
-        reason=reason,
-        evidence_ids=evidence_ids,
-    )
-    trace = [
-        AgentTraceStep(
-            agent="Fulfillment Not Done Agent",
-            action="verify_no_show_or_not_boarded_status",
-            status="completed" if evidence_ids else "warning",
-            summary=rationale,
-            evidence_ids=evidence_ids,
-            metadata={"status_signal": status_signal, "comment_signal": comment_signal},
-        )
-    ]
-    return decision, trace
-
-
-def lower_category_vehicle_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    vehicle = evidence_fields(case, "vehicle")
-    comments = clean_text(evidence_fields(case, "comments").get("comments", ""))
-    comment_signal = bool(re.search(r"\b(low|lower|downgrad|booked|received|instead|hatchback|sedan|suv|cng|electric)", comments, re.I))
-    has_vehicle_tracking = bool(vehicle)
-    evidence_ids = available_ids(case, ["penalty", "vehicle", "comments"])
-
-    if comment_signal and has_vehicle_tracking:
-        confidence = 0.88
-        status: CaseReviewStatus = "auto_ready"
-        reason = "Customer comment and tracking vehicle evidence support lower-category claim."
-    elif comment_signal:
-        confidence = 0.73
-        status = "needs_review"
-        reason = "Customer comment supports lower-category claim, but tracking vehicle evidence is incomplete."
-    elif has_vehicle_tracking:
-        confidence = 0.6
-        status = "needs_review"
-        reason = "Vehicle tracking fields exist, but customer comment support is missing."
-    else:
-        confidence = 0.4
-        status = "missing_evidence"
-        reason = "Vehicle category evidence is unavailable."
-
-    rationale = build_sentence(
-        [
-            "Lower Category Vehicle agent compared customer complaint text with tracked vehicle category.",
-            vehicle_summary(vehicle),
-        ]
-    )
-    decision = make_decision(
-        agent="Lower Category Vehicle Agent",
-        decision="valid_penalty" if confidence >= 0.85 else "needs_review",
-        categories=["Low Category Vehicle"],
-        confidence=confidence,
-        amount=case.recoverable_amount,
-        rationale=rationale,
-        status=status,
-        reason=reason,
-        evidence_ids=evidence_ids,
-    )
-    trace = [
-        AgentTraceStep(
-            agent="Lower Category Vehicle Agent",
-            action="compare_booked_and_received_vehicle",
-            status="completed" if evidence_ids else "warning",
-            summary=rationale,
-            evidence_ids=evidence_ids,
-            metadata={"tracking_vehicle": vehicle},
-        )
-    ]
-    return decision, trace
-
-
-def generic_complaint_agent(case: ClaimCase) -> tuple[AgentDecision, list[AgentTraceStep]]:
-    comments = clean_text(evidence_fields(case, "comments").get("comments", ""))
-    category = build_fallback_message(sub_category=case.sub_category, remarks=case.remarks, comments=comments)
-    has_comments = bool(comments)
-    has_tracking = evidence_status(case, "tracking") == "available"
-    confidence = 0.76 if has_comments and has_tracking else 0.62 if has_comments or has_tracking else 0.5
-    status: CaseReviewStatus = "needs_review" if confidence < 0.85 else "auto_ready"
-    if not has_comments and not has_tracking:
-        status = "missing_evidence"
-    reason = "Generic complaint agent found partial support; specialist logic is not yet available for this category."
-    evidence_ids = available_ids(case, ["penalty", "tracking", "comments"])
     rationale = (
-        f"Generic agent mapped {case.sub_category} to {category} using remarks, comments, and available tracking context."
+        f"Agent used only {source_label} for this decision under the configured source hierarchy."
     )
     decision = make_decision(
-        agent="Generic Complaint Agent",
-        decision="needs_review",
-        categories=category.split(" + "),
+        agent=agent_name,
+        decision=decision_value,
+        categories=categories,
         confidence=confidence,
         amount=case.recoverable_amount,
         rationale=rationale,
         status=status,
         reason=reason,
-        evidence_ids=evidence_ids,
+        evidence_ids=[evidence_id],
     )
     trace = [
         AgentTraceStep(
-            agent="Generic Complaint Agent",
-            action="classify_with_generic_policy",
-            status="completed" if evidence_ids else "warning",
+            agent=agent_name,
+            action="apply_source_hierarchy",
+            status="completed" if status == "auto_ready" else "warning",
             summary=rationale,
-            evidence_ids=evidence_ids,
+            evidence_ids=[evidence_id],
+            metadata={"selected_source": source_field, "source_priority": list(SOURCE_HIERARCHY)},
         )
     ]
     return decision, trace
@@ -475,27 +288,30 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTrac
     confidence = specialist.confidence
     reason = specialist.review_reason
 
-    if specialist.confidence >= 0.85 and evidence_ids and not critical_missing(case):
-        review_status = "auto_ready"
-        reason = "Judge approved: specialist decision is supported by available evidence."
-    elif critical_missing(case):
+    amount = specialist.recommended_recovery_amount
+    if critical_missing(case):
         review_status = "missing_evidence"
         confidence = min(confidence, 0.58)
-        reason = "Judge routed to review because required evidence is missing."
-    elif specialist.confidence < 0.6:
-        review_status = "needs_review"
-        reason = "Judge routed to review because confidence is below the auto-ready threshold."
+        reason = "Judge routed to review because comments, Remarks, and Sub Category are unavailable."
     elif contradiction_detected(case):
         review_status = "contradiction"
         confidence = min(confidence, 0.7)
-        reason = "Judge found a possible contradiction between comments and tracking evidence."
+        reason = "Judge found a possible contradiction in the selected source text."
+    elif evidence_ids:
+        review_status = "auto_ready"
+        confidence = max(confidence, 0.86)
+        amount = case.recoverable_amount
+        reason = "Judge approved: specialist decision is supported by the selected source text."
+    else:
+        review_status = "needs_review"
+        reason = "Judge routed to review because no selected source evidence ID was cited."
 
     decision = make_decision(
         agent="Judge Agent",
-        decision=specialist.decision if review_status == "auto_ready" else "needs_review",
+        decision="valid_penalty" if review_status == "auto_ready" else "needs_review",
         categories=specialist.complaint_categories,
         confidence=confidence,
-        amount=specialist.recommended_recovery_amount,
+        amount=amount,
         rationale=f"Judge verified {specialist.agent}: {specialist.rationale}",
         status=review_status,
         reason=reason,
@@ -508,7 +324,7 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[AgentTrac
             status="completed" if review_status == "auto_ready" else "warning",
             summary=reason,
             evidence_ids=evidence_ids,
-            metadata={"missing_evidence_count": len(missing_evidence), "confidence": confidence},
+            metadata={"missing_source_count": len(missing_evidence), "confidence": confidence},
         )
     ]
     return decision, trace
@@ -548,7 +364,7 @@ def action_for_status(status: CaseReviewStatus) -> str:
     if status == "auto_ready":
         return "Ready for Cab Ops recovery package"
     if status == "missing_evidence":
-        return "Fetch missing evidence or review manually"
+        return "Review manually because source text is missing"
     if status == "contradiction":
         return "Manual review required due to conflicting evidence"
     if status == "failed":
@@ -556,74 +372,83 @@ def action_for_status(status: CaseReviewStatus) -> str:
     return "Review before operational action"
 
 
-def evidence_fields(case: ClaimCase, suffix: str) -> dict[str, Any]:
-    evidence = next((item for item in case.evidence if item.id.endswith(f":{suffix}")), None)
-    return evidence.fields if evidence and evidence.status == "available" else {}
-
-
-def evidence_status(case: ClaimCase, suffix: str) -> str:
-    evidence = next((item for item in case.evidence if item.id.endswith(f":{suffix}")), None)
-    return evidence.status if evidence else "missing"
-
-
-def available_ids(case: ClaimCase, suffixes: list[str]) -> list[str]:
-    selected: list[str] = []
-    for suffix in suffixes:
-        evidence = next((item for item in case.evidence if item.id.endswith(f":{suffix}")), None)
-        if evidence and evidence.status == "available":
-            selected.append(evidence.id)
-    return selected
-
-
-def first_number(*values: Any) -> float | None:
-    for value in values:
-        if value is None:
+def primary_source(case: ClaimCase) -> tuple[str, str, str, str] | None:
+    evidence_by_source: dict[str, tuple[str, str]] = {}
+    for item in case.evidence:
+        if item.status != "available":
             continue
-        number = clean_number(value)
-        if number or str(value).strip() in {"0", "0.0"}:
-            return number
+        source_field = clean_text(item.fields.get("source_field"))
+        if source_field not in SOURCE_HIERARCHY:
+            source_field = source_from_evidence_id(item.id)
+        if source_field not in SOURCE_HIERARCHY:
+            continue
+        source_text = clean_text(item.fields.get("text") or item.fields.get(source_field))
+        if not source_text and source_field == "comments":
+            source_text = clean_text(item.fields.get("comments"))
+        if not source_text and source_field == "remarks":
+            source_text = clean_text(item.fields.get("Remarks") or item.fields.get("remarks"))
+        if not source_text and source_field == "sub_category":
+            source_text = clean_text(item.fields.get("Sub Category") or item.fields.get("sub_category"))
+        if source_text:
+            evidence_by_source[source_field] = (source_text, item.id)
+
+    case_values = {
+        "comments": case.comments,
+        "remarks": case.remarks,
+        "sub_category": case.sub_category,
+    }
+    for source_field in SOURCE_HIERARCHY:
+        if source_field in evidence_by_source:
+            source_text, evidence_id = evidence_by_source[source_field]
+            return source_field, SOURCE_LABELS[source_field], source_text, evidence_id
+        source_text = clean_text(case_values[source_field])
+        if source_text:
+            return source_field, SOURCE_LABELS[source_field], source_text, f"{case.booking_id}:{source_field}"
     return None
 
 
-def build_sentence(parts: list[str]) -> str:
-    return " ".join(part.strip() for part in parts if part and part.strip())
+def source_from_evidence_id(evidence_id: str) -> str:
+    for source_field in SOURCE_HIERARCHY:
+        if evidence_id.endswith(f":{source_field}"):
+            return source_field
+    return ""
 
 
-def vehicle_summary(vehicle: dict[str, Any]) -> str:
-    if not vehicle:
-        return "No tracked vehicle category was available."
-    return "Tracked vehicle fields: " + ", ".join(f"{key}={value}" for key, value in vehicle.items()) + "."
+def categories_from_source(source_field: str, source_text: str) -> list[str]:
+    message = build_fallback_message(
+        sub_category=source_text if source_field == "sub_category" else "",
+        remarks=source_text if source_field == "remarks" else "",
+        comments=source_text if source_field == "comments" else "",
+    )
+    return [category.strip() for category in message.split(" + ") if category.strip()]
+
+
+def agent_name_for_categories(categories: list[str]) -> str:
+    if not categories:
+        return "Source Hierarchy Agent"
+    return AGENT_BY_CATEGORY.get(categories[0], "Source Hierarchy Agent")
 
 
 def critical_missing(case: ClaimCase) -> bool:
-    category = case.sub_category.casefold()
-    if category == CAB_DELAY_CATEGORY.casefold():
-        return evidence_status(case, "timing") != "available"
-    if category == EXTRA_MONEY_TAKEN_CATEGORY.casefold():
-        return evidence_status(case, "comments") != "available" and evidence_status(case, "fare") != "available"
-    if category == FULFILLMENT_NOT_DONE_CATEGORY.casefold():
-        return evidence_status(case, "status") != "available" and evidence_status(case, "comments") != "available"
-    if category == LOWER_CATEGORY_VEHICLE_CATEGORY.casefold():
-        return evidence_status(case, "vehicle") != "available" and evidence_status(case, "comments") != "available"
-    return evidence_status(case, "comments") != "available" and evidence_status(case, "tracking") != "available"
+    return primary_source(case) is None
 
 
 def contradiction_detected(case: ClaimCase) -> bool:
-    category = case.sub_category.casefold()
-    comments = clean_text(evidence_fields(case, "comments").get("comments", ""))
-    if not comments:
+    source = primary_source(case)
+    if source is None:
         return False
-
-    if category == CAB_DELAY_CATEGORY.casefold():
-        timing = evidence_fields(case, "timing")
-        delay_minutes = first_number(
-            timing.get("boarded_after_pickup_minutes"),
-            timing.get("driver_arrived_after_pickup_minutes"),
-            timing.get("driver_started_after_pickup_minutes"),
+    _source_field, _source_label, source_text, _evidence_id = source
+    return bool(
+        re.search(
+            (
+                r"\b(no complaint|no issue|issue resolved|complaint resolved|wrong penalty|"
+                r"incorrect penalty|false claim|invalid penalty|penalty not valid|not genuine|"
+                r"customer denied|denied complaint)\b"
+            ),
+            source_text,
+            re.I,
         )
-        if delay_minutes is not None and delay_minutes <= 5 and re.search(r"\b(delay|late|wait)", comments, re.I):
-            return True
-    return False
+    )
 
 
 def apply_judge_guardrails(case: ClaimCase, decision: AgentDecision) -> AgentDecision:
@@ -632,44 +457,62 @@ def apply_judge_guardrails(case: ClaimCase, decision: AgentDecision) -> AgentDec
             decision,
             review_status="missing_evidence",
             confidence_cap=0.58,
-            reason="Judge guardrail routed to review because required evidence is missing.",
+            reason="Judge guardrail routed to review because comments, Remarks, and Sub Category are unavailable.",
         )
     if contradiction_detected(case):
         return apply_guardrail_status(
             decision,
             review_status="contradiction",
             confidence_cap=0.7,
-            reason="Judge guardrail found a possible contradiction between comments and tracking evidence.",
+            reason="Judge guardrail found a possible contradiction in the selected source text.",
         )
-    if decision.review_status == "auto_ready" and decision.confidence < 0.85:
-        return apply_guardrail_status(
-            decision,
-            review_status="needs_review",
-            confidence_cap=0.84,
-            reason="Judge guardrail routed to review because confidence is below the auto-ready threshold.",
-        )
-    if decision.review_status == "auto_ready" and not decision.evidence_ids:
+    if not decision.evidence_ids:
         return apply_guardrail_status(
             decision,
             review_status="needs_review",
             confidence_cap=0.84,
             reason="Judge guardrail routed to review because no supporting evidence IDs were cited.",
         )
-    return decision
+    return promote_to_auto_ready(decision, case)
+
+
+def promote_to_auto_ready(decision: AgentDecision, case: ClaimCase) -> AgentDecision:
+    return AgentDecision(
+        agent=decision.agent,
+        decision="valid_penalty",
+        complaint_categories=decision.complaint_categories,
+        confidence=max(decision.confidence, 0.86),
+        recommended_recovery_amount=case.recoverable_amount,
+        rationale=decision.rationale,
+        recommended_action=action_for_status("auto_ready"),
+        review_status="auto_ready",
+        review_reason="Judge approved: selected source text is present and has no explicit invalid-penalty signal.",
+        evidence_ids=decision.evidence_ids,
+        decision_source=decision.decision_source,
+        llm_error=decision.llm_error,
+    )
 
 
 def guardrail_payload(case: ClaimCase) -> dict[str, Any]:
+    source = primary_source(case)
     return {
         "critical_missing": critical_missing(case),
         "possible_contradiction": contradiction_detected(case),
-        "available_evidence_ids": [item.id for item in case.evidence if item.status == "available"],
+        "source_priority": list(SOURCE_HIERARCHY),
+        "selected_source": source[0] if source else "",
+        "available_evidence_ids": source_evidence_ids(case),
         "missing_evidence_ids": [item.id for item in case.evidence if item.status == "missing"],
         "error_evidence_ids": [item.id for item in case.evidence if item.status == "error"],
     }
 
 
 def case_evidence_ids(case: ClaimCase) -> set[str]:
-    return {item.id for item in case.evidence}
+    return set(source_evidence_ids(case))
+
+
+def source_evidence_ids(case: ClaimCase) -> list[str]:
+    source = primary_source(case)
+    return [source[3]] if source else []
 
 
 def llm_error_label(error: Exception) -> str:

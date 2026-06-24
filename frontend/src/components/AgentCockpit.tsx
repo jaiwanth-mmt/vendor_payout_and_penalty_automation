@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
+  BarChart3,
   Bot,
+  Building2,
   CheckCircle2,
   ClipboardList,
   Download,
@@ -14,7 +16,16 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 import { fetchAgentCase, fetchAgentCases, fetchReviewQueue } from "../api/jobs";
-import type { AgentCase, AgentTraceStep, EvidenceItem, JobResponse, ReviewQueueItem, StepStatus } from "../types/jobs";
+import type {
+  AgentCase,
+  AgentSummary,
+  AgentTraceStep,
+  EvidenceItem,
+  JobResponse,
+  ReviewQueueItem,
+  StepStatus,
+  VendorSubcategorySummary,
+} from "../types/jobs";
 import BookingSearchForm from "./BookingSearchForm";
 import PaginationControls from "./PaginationControls";
 
@@ -283,10 +294,12 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
         </div>
       </div>
 
+      <VendorPenaltySummary summary={summary} isComplete={isComplete} />
+
       <div className="agentKpiGrid">
         <KpiCard icon={<ShieldCheck size={18} />} label="Auto-ready" value={counts.auto_ready ?? 0} />
         <KpiCard icon={<ClipboardList size={18} />} label="Needs review" value={counts.needs_review ?? 0} />
-        <KpiCard icon={<AlertTriangle size={18} />} label="Missing evidence" value={counts.missing_evidence ?? 0} />
+        <KpiCard icon={<AlertTriangle size={18} />} label="Missing source" value={counts.missing_evidence ?? 0} />
         <KpiCard
           icon={<Sparkles size={18} />}
           label="High-confidence recovery"
@@ -420,6 +433,107 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
         onSelect={handleCaseSelect}
       />
     </section>
+  );
+}
+
+function VendorPenaltySummary({ summary, isComplete }: { summary: AgentSummary | null | undefined; isComplete: boolean }) {
+  const topVendors = summary?.top_vendors_by_penalty ?? [];
+  const topByPenalty = summary?.top_subcategories_by_penalty ?? [];
+  const topByCount = summary?.top_subcategories_by_count ?? [];
+  const hasAnalysis = topVendors.length > 0 || topByPenalty.length > 0 || topByCount.length > 0;
+
+  if (!hasAnalysis) {
+    return (
+      <div className="agentVendorSummary">
+        <div className="agentVendorPanel agentVendorEmptyPanel">
+          <div className="agentEmpty">
+            <Building2 size={24} />
+            <span>{isComplete ? "No vendor penalty data" : "Vendor analysis appears after processing"}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="agentVendorSummary" aria-label="Vendor penalty analysis">
+      <div className="agentVendorPanel">
+        <div className="agentVendorPanelHeader">
+          <span>Top vendor exposure</span>
+          <Building2 size={16} />
+        </div>
+        <div className="vendorRankList">
+          {topVendors.map((vendor, index) => (
+            <div className="vendorRankRow" key={vendor.vendor_name}>
+              <strong>{index + 1}</strong>
+              <div>
+                <span>{vendor.vendor_name}</span>
+                <p>{vendor.case_count} cases</p>
+              </div>
+              <em>{formatAmount(vendor.total_recoverable)}</em>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="agentVendorPanel">
+        <div className="agentVendorPanelHeader">
+          <span>Top subcategories</span>
+          <BarChart3 size={16} />
+        </div>
+        <div className="subcategorySummaryGrid">
+          <SubcategorySummarySection title="By penalty" items={topByPenalty} />
+          <SubcategorySummarySection title="By count" items={topByCount} />
+        </div>
+      </div>
+
+      <div className="agentVendorPanel agentVendorPanelWide">
+        <div className="agentVendorPanelHeader">
+          <span>Vendor subcategory mix</span>
+          <BarChart3 size={16} />
+        </div>
+        <div className="vendorMixList">
+          {topVendors.map((vendor) => (
+            <div className="vendorMixBlock" key={vendor.vendor_name}>
+              <div>
+                <span>{vendor.vendor_name}</span>
+                <em>{formatAmount(vendor.total_recoverable)}</em>
+              </div>
+              <SubcategorySummaryList items={vendor.top_subcategories} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SubcategorySummarySection({ title, items }: { title: string; items: VendorSubcategorySummary[] }) {
+  return (
+    <div className="subcategorySummarySection">
+      <h3>{title}</h3>
+      <SubcategorySummaryList items={items} />
+    </div>
+  );
+}
+
+function SubcategorySummaryList({ items }: { items: VendorSubcategorySummary[] }) {
+  if (!items.length) {
+    return <p className="vendorMutedText">No rows</p>;
+  }
+
+  return (
+    <div className="subcategorySummaryList">
+      {items.map((item) => (
+        <div className="subcategorySummaryRow" key={item.subcategory}>
+          <div>
+            <span>{item.subcategory}</span>
+            <em>{item.case_count} cases</em>
+          </div>
+          <strong>{formatAmount(item.total_recoverable)}</strong>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -13,12 +13,14 @@ from backend.app.domain.cab_delay_enrichment import (
 COMPLAINT_AGAINST_COLUMN = "complaint_against"
 COMPLAINT_AGAINST_ID_COLUMN = "complaint_against_id"
 TITLE_COLUMN = "title"
+VENDOR_NAME_COLUMN = "vendor_name"
 COMPLAINT_AGAINST_VALUE = "dispatch_id"
 TITLE_VALUE = "Service Issue"
 COMPLAINT_METADATA_COLUMNS = [
     COMPLAINT_AGAINST_COLUMN,
     COMPLAINT_AGAINST_ID_COLUMN,
     TITLE_COLUMN,
+    VENDOR_NAME_COLUMN,
 ]
 
 TRACKING_AMOUNT_COLUMNS = [
@@ -58,6 +60,7 @@ def build_common_tracking_enrichment(bookings: dict[str, Any], booking_id: str) 
         COMPLAINT_AGAINST_COLUMN: COMPLAINT_AGAINST_VALUE,
         COMPLAINT_AGAINST_ID_COLUMN: tracking_cell_value(tracking_row.get(COMPLAINT_AGAINST_VALUE)),
         TITLE_COLUMN: TITLE_VALUE,
+        VENDOR_NAME_COLUMN: tracking_cell_value(tracking_row.get(VENDOR_NAME_COLUMN)),
     }
     enrichment.update({
         column: tracking_cell_value(tracking_row.get(column))

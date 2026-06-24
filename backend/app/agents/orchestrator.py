@@ -26,13 +26,21 @@ from backend.app.agents.specialists import (
 from backend.app.domain.complaint_message import MESSAGE_COLUMN
 
 
+COMMENTS_COLUMN = "comments"
+UNKNOWN_VENDOR_NAME = "Unknown vendor"
+VENDOR_NAME_COLUMN = "vendor_name"
+
+
 def build_claim_case(row: pd.Series, *, row_index: int) -> ClaimCase:
+    vendor_name = clean_text(row.get(VENDOR_NAME_COLUMN)) or UNKNOWN_VENDOR_NAME
     return ClaimCase(
         booking_id=clean_text(row.get("Booking ID")),
         sub_category=clean_text(row.get("Sub Category")) or "Uncategorized",
         remarks=clean_text(row.get("Remarks")),
         recoverable_amount=clean_number(row.get("Recoverable")),
         row_index=row_index,
+        comments=clean_text(row.get(COMMENTS_COLUMN)),
+        vendor_name=vendor_name,
     )
 
 
@@ -214,11 +222,11 @@ def build_agent_progress(
             completed=total,
             status="failed" if evidence_error_cases else "warning" if evidence_missing_cases else "completed",
             message=(
-                f"Evidence retrieval found {evidence_error_cases} error cases and {evidence_missing_cases} missing-evidence cases"
+                f"Source selection found {evidence_error_cases} error cases and {evidence_missing_cases} missing-source cases"
                 if evidence_error_cases
-                else f"Evidence retrieval found {evidence_missing_cases} missing-evidence cases"
+                else f"Source selection found {evidence_missing_cases} missing-source cases"
                 if evidence_missing_cases
-                else f"Evidence retrieval completed for {total} cases"
+                else f"Source selection completed for {total} cases"
             ),
         ),
         progress_item(
@@ -269,6 +277,13 @@ def build_agent_progress(
                 if portfolio_error
                 else f"Portfolio summary completed for {total} cases"
             ),
+        ),
+        progress_item(
+            "Vendor Penalty Analysis Agent",
+            total=total,
+            completed=total,
+            status="completed",
+            message=f"Vendor penalty analysis completed for {total} cases",
         ),
     ]
 
@@ -325,6 +340,7 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         for title, count in missing_sources.most_common(5)
     ]
     recommended_actions = build_recommended_actions(case_counts, top_categories, missing_data_hotspots)
+    vendor_analysis = build_vendor_penalty_analysis(cases)
 
     return {
         "executive_summary": (
@@ -345,9 +361,91 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for item in top_categories
         ],
+        **vendor_analysis,
         "missing_data_hotspots": missing_data_hotspots,
         "recommended_actions": recommended_actions,
     }
+
+
+def build_vendor_penalty_analysis(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    vendor_totals: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "vendor_name": "",
+            "case_count": 0,
+            "total_recoverable": 0.0,
+            "subcategory_totals": defaultdict(lambda: {"subcategory": "", "case_count": 0, "total_recoverable": 0.0}),
+        }
+    )
+    category_totals: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"subcategory": "", "case_count": 0, "total_recoverable": 0.0}
+    )
+
+    for case in cases:
+        vendor_name = clean_text(case.get("vendor_name")) or UNKNOWN_VENDOR_NAME
+        subcategory = clean_text(case.get("sub_category")) or "Uncategorized"
+        recoverable = clean_number(case.get("recoverable_amount"))
+
+        vendor_total = vendor_totals[vendor_name]
+        vendor_total["vendor_name"] = vendor_name
+        vendor_total["case_count"] += 1
+        vendor_total["total_recoverable"] += recoverable
+
+        vendor_subcategory = vendor_total["subcategory_totals"][subcategory]
+        vendor_subcategory["subcategory"] = subcategory
+        vendor_subcategory["case_count"] += 1
+        vendor_subcategory["total_recoverable"] += recoverable
+
+        category_total = category_totals[subcategory]
+        category_total["subcategory"] = subcategory
+        category_total["case_count"] += 1
+        category_total["total_recoverable"] += recoverable
+
+    top_vendors = sorted(
+        vendor_totals.values(),
+        key=lambda item: (-item["total_recoverable"], -item["case_count"], item["vendor_name"].casefold()),
+    )[:3]
+    top_categories_by_penalty = sorted(
+        category_totals.values(),
+        key=lambda item: (-item["total_recoverable"], -item["case_count"], item["subcategory"].casefold()),
+    )[:3]
+    top_categories_by_count = sorted(
+        category_totals.values(),
+        key=lambda item: (-item["case_count"], -item["total_recoverable"], item["subcategory"].casefold()),
+    )[:3]
+
+    return {
+        "top_vendors_by_penalty": [
+            {
+                "vendor_name": item["vendor_name"],
+                "case_count": item["case_count"],
+                "total_recoverable": round(item["total_recoverable"], 2),
+                "top_subcategories": normalize_ranked_category_items(
+                    sorted(
+                        item["subcategory_totals"].values(),
+                        key=lambda subcategory_item: (
+                            -subcategory_item["total_recoverable"],
+                            -subcategory_item["case_count"],
+                            subcategory_item["subcategory"].casefold(),
+                        ),
+                    )[:3]
+                ),
+            }
+            for item in top_vendors
+        ],
+        "top_subcategories_by_penalty": normalize_ranked_category_items(top_categories_by_penalty),
+        "top_subcategories_by_count": normalize_ranked_category_items(top_categories_by_count),
+    }
+
+
+def normalize_ranked_category_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "subcategory": item["subcategory"],
+            "case_count": item["case_count"],
+            "total_recoverable": round(item["total_recoverable"], 2),
+        }
+        for item in items
+    ]
 
 
 async def build_portfolio_summary_async(
@@ -386,7 +484,7 @@ def build_recommended_actions(
     if top_categories:
         actions.append(f"Prioritize recovery review for {top_categories[0]['category']} because it has the highest recoverable exposure.")
     if case_counts["missing_evidence"]:
-        actions.append("Refresh tracking/Redash evidence for missing-evidence cases before operational recovery.")
+        actions.append("Review cases where comments, Remarks, and Sub Category are missing before operational recovery.")
     if case_counts["contradiction"]:
         actions.append("Route contradiction cases to a Cab Ops reviewer before any supplier action.")
     if not actions:

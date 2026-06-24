@@ -94,6 +94,7 @@ def write_tracking_json(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b1",
+                        "vendor_name": "savaari",
                         "order_reference_number": "B1",
                         "start_time": "2026-03-19 04:30:00",
                         "driver_started": "2026-03-19 10:20:00",
@@ -134,6 +135,7 @@ def write_tracking_json_with_extra_money(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b1",
+                        "vendor_name": "savaari",
                         "order_reference_number": "B1",
                         "start_time": "2026-03-19 04:30:00",
                         "driver_started": "2026-03-19 10:20:00",
@@ -148,6 +150,7 @@ def write_tracking_json_with_extra_money(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b5",
+                        "vendor_name": "taxibazaar",
                         "order_reference_number": "B5",
                         "type": "ONE_WAY",
                         "ttrip_type": "airport",
@@ -205,6 +208,7 @@ def write_tracking_json_with_fulfillment(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b6",
+                        "vendor_name": "rideally",
                         "order_reference_number": "B6",
                         "booking_status": "CONFIRMED",
                         "tracking_status": "NOT BOARDED",
@@ -265,6 +269,7 @@ def write_tracking_json_with_lower_category(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b7",
+                        "vendor_name": "wticabs",
                         "order_reference_number": "B7",
                         "vehicle_subcategory": "basic-electric",
                         "vehicle_type": "sedan",
@@ -335,7 +340,7 @@ def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
             {
                 "executive_summary": "LLM portfolio summary: recovery cases were investigated and routed by confidence.",
                 "top_complaint_drivers": ["Cab Delay: high recoverable exposure"],
-                "recommended_actions": ["Prioritize high-confidence recoveries and review evidence gaps."],
+                "recommended_actions": ["Prioritize high-confidence recoveries and review source gaps."],
                 "missing_data_hotspots": [],
                 "category_breakdown": [],
             }
@@ -362,10 +367,10 @@ def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
 
 
 def build_agent_decision_response(prompt: str) -> str:
-    sub_category = regex_value(prompt, r'"sub_category":\s*"([^"]+)"')
     evidence_ids = list(dict.fromkeys(re.findall(r'"id":\s*"([^"]+)"', prompt)))[:3]
     amount = float(regex_value(prompt, r'"recoverable_amount":\s*([0-9.]+)') or 100)
-    category = agent_category_for_subcategory(sub_category, prompt)
+    selected_source_text = regex_value(prompt, r'"text":\s*"([^"]*)"')
+    category = agent_category_for_prompt(selected_source_text or prompt)
     status = "auto_ready" if evidence_ids else "missing_evidence"
     return json.dumps(
         {
@@ -373,30 +378,30 @@ def build_agent_decision_response(prompt: str) -> str:
             "complaint_categories": [category],
             "confidence": 0.91 if status == "auto_ready" else 0.55,
             "recommended_recovery_amount": amount if status == "auto_ready" else 0,
-            "rationale": f"Mock LLM found {category} supported by cited evidence.",
+            "rationale": f"Mock LLM found {category} supported by the selected source.",
             "recommended_action": "Ready for Cab Ops recovery package" if status == "auto_ready" else "Review manually",
             "review_status": status,
-            "review_reason": "Mock LLM judge approved the cited evidence." if status == "auto_ready" else "Evidence is incomplete.",
+            "review_reason": "Mock LLM judge approved the selected source." if status == "auto_ready" else "Source text is incomplete.",
             "evidence_ids": evidence_ids,
         }
     )
 
 
-def agent_category_for_subcategory(sub_category: str, prompt: str) -> str:
-    normalized = sub_category.casefold()
-    if "extra money" in normalized:
-        return "Extra Money Taken"
-    if "fulfillment" in normalized or "fulfilment" in normalized:
+def agent_category_for_prompt(prompt: str) -> str:
+    normalized = prompt.casefold()
+    if "fulfillment" in normalized or "fulfilment" in normalized or "did not arrive" in normalized:
         return "Vendor No Show"
-    if "lower category" in normalized:
+    if "lower category" in normalized or "low category vehicle" in normalized or "electric sedan" in normalized:
         return "Low Category Vehicle"
-    if "driver behavior" in normalized or "driver behaviour" in normalized:
+    if "extra money" in normalized or "extra cash" in normalized:
+        return "Extra Money Taken"
+    if "driver behavior" in normalized or "driver behaviour" in normalized or "rudely" in normalized:
         return "Bad Driver Behaviour/Skill"
     if "ac not working" in normalized:
         return "AC Not Working"
     if "vehicle breakdown" in normalized:
         return "Cab Breakdown"
-    if "Cab Delayed > 15 Minutes" in prompt:
+    if "Cab Delayed > 15 Minutes" in prompt or "needed 20 minutes" in normalized:
         return "Cab Delayed > 15 Minutes"
     return "Cab Delay"
 
