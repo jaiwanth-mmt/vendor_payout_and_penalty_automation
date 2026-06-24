@@ -163,6 +163,8 @@ class ClaimCase:
     remarks: str
     recoverable_amount: float
     row_index: int
+    comments: str = ""
+    vendor_name: str = "Unknown vendor"
     evidence: list[EvidenceItem] = field(default_factory=list)
     trace: list[AgentTraceStep] = field(default_factory=list)
     specialist_decision: AgentDecision | None = None
@@ -186,6 +188,8 @@ class ClaimCase:
             "booking_id": self.booking_id,
             "sub_category": self.sub_category,
             "remarks": self.remarks,
+            "comments": self.comments,
+            "vendor_name": self.vendor_name,
             "recoverable_amount": round(self.recoverable_amount, 2),
             "row_index": self.row_index,
             "review_status": self.review_status,

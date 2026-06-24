@@ -3,7 +3,7 @@
     "source_workbook": "data/demo/expected_agentic_loss_recovery_output.xlsx",
     "table_name": "tracking_reports_raw",
     "booking_count": 71,
-    "selected_column_count": 83,
+    "selected_column_count": 84,
     "selected_columns": [
       "dispatch_id",
       "order_reference_number",
@@ -87,7 +87,8 @@
       "flight_number",
       "flight_departure_time",
       "flight_date",
-      "is_flight_early"
+      "is_flight_early",
+      "vendor_name"
     ],
     "dropped_empty_or_default_columns": [
       "trip_type",
@@ -110,6 +111,20 @@
       "source_id": 10,
       "rows_fetched": 96,
       "booking_count_with_comments": 67
+    },
+    "vendor_name": {
+      "source_table": "incabs_suppliers",
+      "source_tracking_columns": [
+        "supplier_id",
+        "original_supplier_id",
+        "detached_supplier_id"
+      ],
+      "source_key_column": "oid",
+      "source_value_column": "on_final",
+      "output_column": "vendor_name",
+      "supplier_id_count": 18,
+      "matched_supplier_count": 18,
+      "matched_tracking_row_count": 71
     }
   },
   "bookings": {
@@ -189,7 +204,8 @@
           "arrived_latlon": "12.82,77.66",
           "boarded_latlon": "12.82,77.66",
           "alight_latlon": "10.27,77.49",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer reported that their cab had not yet arrived for a trip scheduled to start at 4:00. The driver informed them they would arrive in another 20 minutes, but the customer was unable to reach the driver afterward. The agent connected with the driver and informed the customer that the driver was delayed due to refueling and would arrive shortly. The customer inquired about additional charges for the wait time, but the agent assured them that no additional charges would be incurred due to the delay being on the driver's end."
@@ -270,7 +286,8 @@
           "arrived_latlon": "13.2,77.71",
           "boarded_latlon": "13.2,77.71",
           "alight_latlon": "12.87,77.66",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "rideally"
         }
       ],
       "comments": "The customer, Saiya, contacted the service regarding a delay in the arrival of an airport cab, which she had been waiting for over 25 minutes. The agent confirmed that the cab was booked from Terminal One International Airport, Bangalore to Sai Shree Layout, Bengaluru, Karnataka, and checked with the driver, who indicated it would take an additional 10 to 15 minutes to arrive. The customer expressed frustration over the wait time and mentioned that the app states charges apply if the wait exceeds 20 minutes. The agent reassured her that no waiting charges would be incurred due to the driver's delay and promised to follow up on the situation. The customer requested that the driver arrive on time and expressed dissatisfaction with the current service."
@@ -350,7 +367,8 @@
           "arrived_latlon": "30.46,78.06",
           "boarded_latlon": "30.46,78.06",
           "alight_latlon": "28.56,77.19",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "wticabs"
         }
       ],
       "comments": "Customer booked a car from Mussoorie to Delhi, expecting an electric vehicle but received a CNG vehicle instead. The customer mentioned a fare difference of over ₹2000 between the electric and CNG options. The agent offered a ₹200 refund as a gesture of apology, which the customer accepted. The total amount due was not explicitly stated, but there was mention of differential amounts related to the vehicle types."
@@ -429,7 +447,8 @@
           "arrived_latlon": "28.64,77.22",
           "boarded_latlon": "28.64,77.22",
           "alight_latlon": "28.56,77.12",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "refex"
         }
       ],
       "comments": "The customer booked a car for a 3-hour local service from Delhi Railway Station to Paharganj, but the driver has not arrived despite the pickup time being set for 11 AM. The customer has been waiting for over an hour and expressed frustration over the delay, stating that the driver is still 10 kilometers away. The agent apologized for the inconvenience and offered to check the issue further."
@@ -505,7 +524,8 @@
           "total_driver_charge": 0.0,
           "started_latlon": "15.73,73.86",
           "arrived_latlon": "15.73,73.86",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer booked an airport transport transfer from Manohar Parrikar International Airport to Goa city. The driver was late by 15 minutes, and the customer was frustrated with the situation, stating that the driver had promised to arrive in 5 to 10 minutes. The customer's seat number was B 15. The agent apologized and checked on the driver while the customer expressed dissatisfaction with the wait time.\n\nCustomer requested details about a cab for an airport transfer scheduled at 3:15 from Manohar International Airport to B 15. The agent confirmed that a driver named Raju was assigned but was not responding to calls. The agent promised to provide updates within 10 to 15 minutes and asked the customer to wait for a callback."
@@ -583,7 +603,8 @@
           "night_charges": 0.0,
           "driver_charge_per_day": 0.0,
           "total_driver_charge": 0.0,
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer Somnath Goswami inquired about a cab booking for today at 1:30 PM, providing the booking ID NC971085313274974816. The customer did not receive driver details or booking confirmation and expressed concern about the timing and the potential waste of money. The agent offered to check the information and requested to put the call on hold for 5 to 7 minutes, indicating they would call back with updates. The customer was frustrated about the situation but agreed to wait for further information."
@@ -661,7 +682,8 @@
           "started_latlon": "22.82,86.22",
           "boarded_latlon": "22.65,88.45",
           "alight_latlon": "23.05,84.57",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "eroovo"
         }
       ],
       "comments": "The customer expressed dissatisfaction with the service, particularly regarding a driver who was unaware of the pickup location despite it being provided in the booking. The customer mentioned a scheduled pickup at 12:15 and noted delays due to the driver not knowing the route, which was complicated by a strike affecting traffic. The agent acknowledged the situation, explained the driver's misunderstanding, and promised to follow up on the case. The conversation involved multiple requests for the current location, which the customer felt was unnecessary since it was already provided. The agent assured to raise a compensation request for the delay."
@@ -742,7 +764,8 @@
           "arrived_latlon": "17.39,78.48",
           "boarded_latlon": "17.46,78.57",
           "alight_latlon": "17.46,78.57",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer booked a cab from their hotel to a destination but is experiencing issues with the cab not directing to the hotel, instead showing an airport location. The agent confirms the pickup is from New Hotel Sohail to Srisailam but acknowledges a potential technical issue. The customer also mentions not receiving any details for the cab and the pickup time was 30. The conversation includes a hold to validate with the vendor team.\n\nThe customer, Vishal Bhogal, is facing a payment issue with a cab driver regarding additional charges totaling approximately 10,788 INR, which includes night charges and tolls. The driver is asking for an extra 1,500 INR, which the customer disputes. The agent advises not to pay without a valid receipt. The conversation revolves around validating the charges and ensuring that the customer does not pay without proper documentation."
@@ -823,7 +846,8 @@
           "flight_number": "6E460",
           "flight_departure_time": "2026-03-19 01:50:00",
           "flight_date": "2026-03-19",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "kangaroocars"
         }
       ]
     },
@@ -905,7 +929,8 @@
           "flight_number": "6E614",
           "flight_departure_time": "2026-03-19 09:00:00",
           "flight_date": "2026-03-19",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxida"
         }
       ]
     },
@@ -985,7 +1010,8 @@
           "arrived_latlon": "13.63,79.54",
           "boarded_latlon": "13.64,79.55",
           "alight_latlon": "13.63,79.43",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "The customer inquired about an additional charge of ₹800 for a ghat road while traveling from Tirupati to Tirumala, expressing that such charges should have been mentioned during booking since Tirupati and Tirumala are both hilly areas. The agent mentioned that the booking has been canceled and that the customer would need to pay the additional charges if they want to visit. The customer expressed dissatisfaction with the service and stated they would not use Makemytrip again unless a proper resolution is provided within 24 hours."
@@ -1066,7 +1092,8 @@
           "arrived_latlon": "23.0,72.79",
           "boarded_latlon": "23.0,72.8",
           "alight_latlon": "22.31,70.81",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer booked a diesel cab from Ahmedabad to Rajkot but received a CNG cab instead. They expressed dissatisfaction for paying extra for diesel but receiving a cheaper option, which caused delays during the trip. The cab was one hour late, and there was an additional 20-minute wait for CNG refueling. The agent acknowledged the issues and mentioned that a refund process would take place within 48 hours. The customer had also sent a photo of the CNG refueling as proof. The agent confirmed that the matter would be escalated to the concerned department for resolution.\n\nCustomer Nakshatra made a booking from Ahmedabad to Rajkot with a scheduled pick-up at 2:15 PM. The driver informed that he would arrive at 3:10 PM instead. Customer expressed frustration over the delay but agreed to wait for the driver. Agent acknowledged the delay and assured the customer of a callback and compensation for the inconvenience. No specific details about fare differences, total amount due, or cancellation fees were mentioned in the conversation."
@@ -1145,7 +1172,8 @@
           "total_driver_charge": 0.0,
           "started_latlon": "12.91,77.64",
           "arrived_latlon": "12.89,77.64",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxida"
         }
       ],
       "comments": "Customer booked a cab from AKR Tech Park to the airport for 6 teammates. The driver arrived drunk, prompting the customer to request another driver or a refund. The customer expressed urgency due to a flight and highlighted concerns about the situation. The agent confirmed the case for a refund and requested not to make any cancellations, allowing 48 hours for processing. No specific seat numbers, travel dates, or charges were discussed."
@@ -1224,7 +1252,8 @@
           "arrived_latlon": "19.1,72.87",
           "boarded_latlon": "19.1,72.87",
           "alight_latlon": "18.55,73.94",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "wticabs"
         }
       ],
       "comments": "Customer Praveen is frustrated with a cab booking as the driver has not picked up the phone for nearly one hour while he waits at the airport. The agent acknowledges the delay and assures him that an alternate cab will be sent. Customer expresses dissatisfaction with the booking system and questions the charges when the driver is unavailable. The agent mentions that there will be applicable compensation and penalties on their end."
@@ -1306,7 +1335,8 @@
           "arrived_latlon": "13.03,77.66",
           "boarded_latlon": "13.03,77.66",
           "alight_latlon": "11.95,79.82",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer booked a cab from Bangalore to Puducherry but has not received cab details yet. The agent confirmed that the booking is accepted and is working on finding a driver. Customer is concerned whether the driver will arrive by the booking time and asks if the booking will be cancelled. The agent reassured that the booking is confirmed and they are searching for the driver."
@@ -1386,7 +1416,8 @@
           "arrived_latlon": "23.16,77.45",
           "boarded_latlon": "23.16,77.45",
           "alight_latlon": "23.29,77.34",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "ongoride"
         }
       ],
       "comments": "Customer Lay Maheshwari contacted regarding a cab booking issue where the driver was heading to the airport instead of the customer's home for pickup. The customer expressed concerns about the driver’s estimated arrival time and requested priority reassignment of the booking. The agent confirmed that the driver would arrive in approximately 15 minutes, but no alternate cab was available. The customer indicated they would wait for 15 minutes but would call to cancel if the driver did not arrive on time."
@@ -1465,7 +1496,8 @@
           "arrived_latlon": "28.41,77.04",
           "boarded_latlon": "28.41,77.05",
           "alight_latlon": "28.56,77.12",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "meru"
         }
       ],
       "comments": "Customer inquired about a discrepancy in cab fare after paying an advance of ₹256. The driver was charging ₹715 instead of the expected ₹500. After checking, the agent mentioned a technical issue on their end causing the fare difference. The customer agreed to pay the driver but requested a refund from the company afterwards, expressing dissatisfaction with the situation."
@@ -1545,7 +1577,8 @@
           "night_charges": 0.0,
           "driver_charge_per_day": 0.0,
           "total_driver_charge": 0.0,
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "kangaroocars"
         }
       ],
       "comments": "The customer booked a cab from Chahecha Residency to KSR Majesty for a total amount of 700, of which 300 was already paid. The driver did not arrive due to a car puncture, and the customer is currently using an Uber cab. The customer requests to cancel the original booking and asks for a refund. The agent informs that the remaining amount of 600 is needed to complete the new booking, and assures that the original payment can be refunded. The customer expresses a desire to cancel the initial booking and get a refund, confirming that they cannot cancel the Uber booking. The agent requests the customer allow some time for a callback regarding the refund."
@@ -1625,7 +1658,8 @@
           "arrived_latlon": "12.94,77.7",
           "boarded_latlon": "12.94,77.7",
           "alight_latlon": "13.2,77.71",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "quickride"
         }
       ],
       "comments": "Customer booked a cab scheduled for pickup at 5:35 from Krishvi Gavishi to Terminal one. The customer had issues with the tracking link and the driver not answering the phone. The agent confirmed the driver would arrive within 5 to 10 minutes and that the tracking would resume once the customer boarded the cab."
@@ -1706,7 +1740,8 @@
           "arrived_latlon": "32.28,75.63",
           "boarded_latlon": "32.28,75.63",
           "alight_latlon": "31.37,75.56",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "Customer booked a cab from Pathankot to Amritsar for today at 6:00 AM, but the cab did not arrive at the specified pickup location. The agent acknowledged the issue and placed the call on hold to speak with the supplier."
@@ -1785,7 +1820,8 @@
           "arrived_latlon": "32.25,76.3",
           "boarded_latlon": "28.5,77.03",
           "alight_latlon": "28.56,77.04",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer had a trip from Dharamshala to Delhi where the driver did not turn up as scheduled at 8:00 AM. Customer contacted MakeMyTrip and received calls from multiple individuals regarding alternative arrangements, leading to confusion. Customer requested a link to their profile for confirmation of the new driver details, which the agent stated they could not provide. The customer expressed frustration over the situation and insisted on receiving confirmation about the driver from MakeMyTrip. The agent agreed to connect with the team for further assistance.\n\nCustomer booked a cab from Dharmshala to New Delhi scheduled for 8:00 AM but the driver informed he would be 2 hours late. The app shows the driver has arrived, but the customer believes the driver is at home. The customer is frustrated with the situation and requests action to resolve the issue. The agent promises to highlight the concern to the vendor team and update the customer within half an hour."
@@ -1864,7 +1900,8 @@
           "arrived_latlon": "12.85,77.6",
           "boarded_latlon": "12.85,77.6",
           "alight_latlon": "13.2,77.72",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "quickride"
         }
       ],
       "comments": "The customer reported being charged ₹850 extra by the cab driver, who claimed it was due to crossing 70 kilometers. The customer insisted they had only traveled 71 kilometers and requested verification from the agent. The agent informed the customer that they would validate the case further with the vendor team and follow up after 4 PM, as the customer would be unavailable for the next 3 hours."
@@ -1943,7 +1980,8 @@
           "arrived_latlon": "30.39,76.79",
           "boarded_latlon": "30.39,76.79",
           "alight_latlon": "28.39,76.98",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer Suresh Kumar Karodia booked a taxi from Ambala to Gurgaon but received a CNG car instead of the diesel car he booked, resulting in a ₹800 rate difference. The agent confirmed the booking was showing as cancelled, which the customer disputed. The customer provided two booking IDs, NC77777 and NC78664802733170318, and confirmed that his relatives were travelling in the cab. The agent requested photos of the car to highlight the issue and assured the customer that they would address the rate difference. The customer was concerned about who would pay the difference if they had to make a higher payment. The call ended with the customer agreeing to send the requested photos."
@@ -2023,7 +2061,8 @@
           "arrived_latlon": "19.06,72.86",
           "boarded_latlon": "19.06,72.86",
           "alight_latlon": "16.85,74.58",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "Customer booked a diesel cab but received a CNG vehicle instead. Customer expressed dissatisfaction about the comfort and pricing, insisting they should not pay for diesel charges since they received a CNG vehicle. Agent confirmed the booking was for a diesel vehicle and mentioned that a fare difference refund would be checked but the customer must pay the current amount of ₹5,770. Customer refused to pay this amount, stating they are only willing to pay for the CNG fare. Discussion continued with customer expressing frustration about the situation and the agent trying to explain the policy regarding the payment. The customer finally agreed to pay the CNG amount but insisted on not paying the full amount quoted by the agent. The call ended with the customer being dissatisfied and not fully resolved on the payment issue."
@@ -2104,7 +2143,8 @@
           "night_charges": 0.0,
           "driver_charge_per_day": 250.0,
           "total_driver_charge": 250.0,
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "Customer booked a cab through Makemytrip for pickup at Coimbatore International Airport at 8:20 AM. The cab driver was unavailable, and the customer needed to wait 30 to 40 minutes for another driver to be assigned. The agent assured that the alternative cab would be at the same price as the original booking and offered to cancel the booking if the customer did not want to wait. The customer agreed to wait and was informed that updates would be provided via the app or email.\n\nCustomer Ravi called regarding a cancelled ride, which the driver cancelled. He requested a refund. The agent informed him that the case is escalated and he should wait for 24 to 48 hours for a resolution. The agent stated that a refund is not possible immediately and that the situation is being handled by another executive. The customer expressed dissatisfaction with the situation but agreed to wait for the 48 hours for an update."
@@ -2185,7 +2225,8 @@
           "boarded_latlon": "22.73,75.8",
           "alight_latlon": "23.14,75.82",
           "flight_number": "6E-284",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer reported being charged ₹181 extra for a cab from Indore to Nagjiri, disputing the extra charge due to previous bookings being under 55 kilometres. The agent requested a payment screenshot to escalate the case for refund."
@@ -2264,7 +2305,8 @@
           "arrived_latlon": "12.98,77.74",
           "boarded_latlon": "12.98,77.74",
           "alight_latlon": "13.2,77.71",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "mega"
         }
       ],
       "comments": "Customer booked a cab to the airport from Bangalore and was charged extra for tolls that were not present during the journey. The agent informed the customer that the issue would be escalated to the concerned department, which would take up to 48 hours to provide a resolution. The customer needs to pay the full amount to the driver for now, and the concerned department will validate the issue regarding the toll charges."
@@ -2344,7 +2386,8 @@
           "started_latlon": "25.57,83.56",
           "boarded_latlon": "25.57,83.56",
           "alight_latlon": "26.77,80.98",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a cab for intercity transfer from Ghazipur to Lucknow but had not received a call from the driver. The agent checked with the driver, who confirmed he was on his way and would call the customer upon arrival."
@@ -2425,7 +2468,8 @@
           "arrived_latlon": "12.84,77.65",
           "boarded_latlon": "12.84,77.65",
           "alight_latlon": "13.2,77.72",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "shoffr"
         }
       ],
       "comments": "Customer booked a cab for 9:30 PM from Bangalore Neeladhu Road to the airport but the driver was late due to rain and traffic, with a minimum wait time of 20 minutes. Customer inquired about an alternate cab and potential refund if they took one. Agent confirmed that if the customer opts for an alternate cab, they will highlight the case for a refund. Customer decided to wait for 20 minutes before taking further action."
@@ -2507,7 +2551,8 @@
           "flight_number": "IX-1240",
           "flight_departure_time": "2026-03-18 12:00:00",
           "flight_date": "2026-03-18",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "milodrive"
         }
       ],
       "comments": "The customer, Mahesh, called regarding a cab booking from Bangalore Terminal 2 to Whitefield due to a flight diversion to Tiruchi. The original flight was scheduled to land on 18th March at 8:40 PM but was delayed. Mahesh requested for the cab arrangement to be rescheduled based on the new landing time, but the agent informed him that modification options were not available for the booking and suggested creating a new booking instead. The agent escalated the refund issue to higher authorities, assuring Mahesh that he would receive a response within 48 hours. Mahesh expressed frustration about not knowing when to create a new cab booking. The agent provided a ticket ID for tracking the issue and reiterated that the resolution would be a refund, asking Mahesh to check his email for the ticket number. Mahesh was advised to create a fresh booking through the Makemytrip app for the cab. The conversation ended with Mahesh thanking the agent."
@@ -2586,7 +2631,8 @@
           "arrived_latlon": "29.91,78.0",
           "boarded_latlon": "29.9,77.96",
           "alight_latlon": "28.64,77.22",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a cab from Haridwar to Delhi and expected a diesel vehicle but received a CNG vehicle instead. The customer expressed dissatisfaction with the lack of space and the unexpected vehicle type, requesting a refund. The agent offered to provide an OTP for the cab but the customer was frustrated with the service and demanded clarity regarding the charges and refund process. The customer threatened to take legal action, mentioning consumer court if the issue was not resolved. The agent requested time to coordinate with the supplier for a possible solution."
@@ -2665,7 +2711,8 @@
           "total_driver_charge": 0.0,
           "started_latlon": "30.89,75.84",
           "arrived_latlon": "30.89,75.84",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer was frustrated due to a cab not arriving for their scheduled pick-up from Ludhiana to Amritsar at 5 PM. The customer was kept on hold multiple times while the agent checked with the vendor. The customer expressed dissatisfaction with the service, stating that they had been waiting for over two hours. The agent suggested the customer take an alternate cab and mentioned that a refund request would be sent to the concerned department, but the customer was unhappy with this solution. The customer mentioned they were recording the call and demanded to speak to a senior manager, claiming they would not settle for just a refund but would require more due to the inconvenience caused. No seat numbers, travel dates, or specific fare details were provided during the conversation. The customer indicated a willingness to cancel the booking and was unhappy about the time wasted waiting for the cab. No specific charges or refunds were mentioned. The conversation was primarily in Hinglish."
@@ -2744,7 +2791,8 @@
           "arrived_latlon": "19.1,72.87",
           "boarded_latlon": "19.11,72.88",
           "alight_latlon": "19.89,75.35",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer booked a taxi from Mumbai to Aurangabad, expecting a travel time of 5 hours based on the route provided. There was confusion regarding toll charges and the specific route taken, as the customer was informed that the National Highway route would not incur additional costs while the driver was indicating an Expressway route. The customer expressed dissatisfaction with the service and emphasized the importance of the included toll charges in the booking. The agent confirmed that the route taken was via the National Highway and attempted to clarify the situation. The customer sent a screenshot of their booking details showing the route. The conversation included back-and-forth about the travel time and charges, with the customer feeling frustrated about the discrepancies. The customer mentioned previous issues with the service and threatened to cancel the booking if the matter was not resolved satisfactorily."
@@ -2823,7 +2871,8 @@
           "arrived_latlon": "17.4,78.48",
           "boarded_latlon": "17.4,78.48",
           "alight_latlon": "17.24,78.43",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "choiscars"
         }
       ],
       "comments": "Customer booked an airport transfer cab for 6:50 AM but has not received it yet. The customer is boarding the car as the driver has just arrived."
@@ -2903,7 +2952,8 @@
           "arrived_latlon": "12.94,77.62",
           "boarded_latlon": "12.94,77.62",
           "alight_latlon": "12.31,76.66",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer booked a cab from Bangalore to Coorg, but the cab was marked as arrived despite the driver being 500 meters away and experiencing issues with diesel. The customer expressed frustration about the inaccurate status and waiting time. The agent informed the customer that they would not incur any waiting charges due to the driver's delay. The conversation ended with the agent assuring the customer and thanking them for their patience."
@@ -2984,7 +3034,8 @@
           "arrived_latlon": "28.51,77.39",
           "boarded_latlon": "28.51,77.4",
           "alight_latlon": "26.93,75.79",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer inquired about a cab booking from Noida to Jaipur, seeking clarification on included toll taxes and the route. The conversation revolved around discrepancies regarding the route shown on the booking and the associated toll charges. The agent confirmed that the route was via the National Expressway, but the customer argued that the toll charges were not accurately reflected in the booking. The customer expressed dissatisfaction with the service provider's behavior and insisted that the charges mentioned in the booking should include tolls for the Expressway. A heated discussion ensued regarding payment obligations, with the customer refusing to pay extra charges that were not clearly justified. The agent attempted to assist but was met with frustration from the customer, who demanded a formal complaint due to the service provider's treatment and lack of clarity on charges. In the end, the customer stated they would not comply with the payment until the issues were resolved and mentioned the possibility of escalating the matter further.\n\nThe customer was inquiring about extra charges for expressway tolls that were not included in their booking, which explicitly stated that tolls were included. The customer argued that the booking indicated a route of 303 kilometers via the expressway and expressed frustration over being charged for tolls. The agent explained that only normal toll charges were included and that the customer would have to pay the expressway tolls. The customer demanded a resolution and proof of the allocated route, expressing dissatisfaction with the service and the information provided. After extensive back and forth, the agent confirmed the customer would need to pay the expressway toll and would receive a reimbursement after providing a receipt. The customer agreed to pay in cash and requested confirmation via email before completing the payment."
@@ -3063,7 +3114,8 @@
           "arrived_latlon": "28.66,77.38",
           "boarded_latlon": "28.66,77.38",
           "alight_latlon": "30.11,78.44",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer expressed frustration regarding the delay in receiving a replacement vehicle, having waited for three hours. The agent informed the customer that the original cab had traveled 100 kilometers and the customer could receive a refund for the remaining distance. The refund process would take 48 hours. The customer mentioned needing to use a private vehicle due to the delay and requested clarity on payment for the alternative vehicle. The customer was also concerned about the service and hinted at taking action against the company for the poor experience. The agent assured the customer that appropriate action would be taken regarding their concerns.\n\nThe customer, Akhil, has been on the call for over two hours regarding a breakdown of a vehicle scheduled for his transport. The vehicle broke down around 8:30 AM, and despite multiple calls to the service team, no replacement has arrived. The agent acknowledges the delay and mentions that alternate vehicles were arranged but updates have not been received due to communication issues. The customer is frustrated about the lack of support and is concerned about missing an important meeting. The agent promises to follow up and provide an update within 10 minutes.\n\nThe customer, Pushkar Kumar, expressed frustration over a two-hour wait for a cab with a broken clutch. The agent offered to arrange an alternate cab within 15 to 30 minutes and promised to call back with a resolution. The customer repeatedly emphasized the delay and requested immediate alternate arrangements, indicating dissatisfaction with the service. The conversation primarily revolved around the delay and lack of timely communication from the agent.\n\nCustomer, Pushkar Kumar, reported that a taxi booked from Ghaziabad to Rishikesh through MakeMyTrip had broken down. The agent assured that a mechanic would arrive within ten minutes to fix the cab, and if it could not be repaired, an alternate vehicle would be arranged. The customer expressed concern about the time it would take to resolve the issue and was informed that they would receive a callback in 20 to 30 minutes for confirmation."
@@ -3144,7 +3196,8 @@
           "flight_number": "6E2772",
           "flight_departure_time": "2026-03-17 13:00:00",
           "flight_date": "2026-03-17",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxida"
         }
       ],
       "comments": "The customer raised a complaint about a booking that was not cancelled. The agent checked with a previous executive and confirmed that the vendor approved the refund of the paid amount. The customer requested to cancel the ride and have the payment transferred to their wallet. The agent explained that booking cancellation in a non-free cancellation window would prevent a refund, but assured the customer that the refund would be processed automatically with the cancellation of the booking. The customer was informed they would receive the refund within 24 to 48 hours and a callback from the team. The customer expressed satisfaction and thanked the agent multiple times before ending the call.\n\nCustomer booked a cab for airport pickup but the flight was delayed, causing the driver to take longer to arrive. Customer has taken an alternate transport and requested to cancel the cab booking and initiate a refund. The agent confirmed the cancellation and mentioned that the refund will be processed within 24 to 48 hours."
@@ -3227,7 +3280,8 @@
           "flight_number": "IX1135",
           "flight_departure_time": "2026-03-18 13:25:00",
           "flight_date": "2026-03-18",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "refex"
         }
       ],
       "comments": "The customer is frustrated about a delayed cab that was supposed to arrive at 22:20 but is now expected to arrive much later due to heavy rain and traffic. The customer has already waited for half an hour and is upset about the lack of communication and assistance regarding the delay. The agent suggests waiting for the cab or taking an alternate cab, but the customer is concerned about potential extra costs and compensation for the inconvenience. The agent mentions that a refund request has been raised but does not guarantee compensation for any additional expenses incurred due to the alternative cab. The customer is adamant about not waiting any longer and expects compensation for the additional fare if they choose to book another cab. The conversation ends with the customer expressing dissatisfaction and indicating they will likely use a different service.\n\nCustomer had a cab booking that did not arrive, causing them to wait over an hour before cancelling the ride. They expressed frustration over the lack of communication from the driver and demanded a refund. The agent apologized and requested a screenshot of the call logs to process the refund, stating it could take up to 48 hours. The customer insisted on their status as a guaranteed trip customer and questioned the lack of accountability from the company. They also mentioned previous issues with bookings and highlighted their dissatisfaction with the service provided."
@@ -3306,7 +3360,8 @@
           "arrived_latlon": "28.55,77.11",
           "boarded_latlon": "28.55,77.09",
           "alight_latlon": "26.93,75.83",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a cab from Delhi to Jaipur and was charged ₹3375 by the driver, but believes the correct amount should have included an additional ₹600 already paid. The agent confirmed that the ₹600 was an extra charge and advised the customer to provide proof of payment for further validation. The customer was informed that if the charges were valid, a receipt would be provided, and if not, a refund would be attempted. The customer was instructed to send a screenshot of the payment proof to the agent's email and was promised a resolution within 48 hours."
@@ -3382,7 +3437,8 @@
           "night_charges": 0.0,
           "driver_charge_per_day": 533.3333333333334,
           "total_driver_charge": 1600.0,
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer booked a vehicle for 8:00 AM, but the driver, Pratap, was still one to one and a half hours away at 8:30 AM. The customer expressed frustration due to the delay, as they had local activities planned. After confirming the delay, the agent informed the customer that the driver would arrive around 10:00 AM. The customer requested compensation for the two-hour delay and stated they needed to book another vehicle for city activities. The agent agreed to follow up at 10:00 AM to confirm the driver's arrival and mentioned that compensation could be processed after the trip started. The customer agreed to wait until 10:00 AM for an update.\n\nCustomer booked a vehicle for 8:00 AM pickup but the driver arrived at 10:30 AM, causing a delay of 2.5 hours. Customer opted for an alternate cab due to the delay and is requesting compensation for the inconvenience and extra charges incurred, amounting to ₹2225. Customer is seeking reimbursement of at least ₹1000. The agent confirmed the driver's name as Pratap Bansode and noted the delay. The customer expressed frustration over the situation and threatened to share their experience on social media if not resolved.\n\nCustomer requested a partial refund that was approved but was erroneously placed in the Makemytrip wallet instead of the source account. Customer expressed frustration wanting the funds in the original account. The agent confirmed the refund amount is ₹500 and mentioned it will reflect in the account as per the bank processing cycle."
@@ -3462,7 +3518,8 @@
           "started_latlon": "28.44,77.18",
           "boarded_latlon": "28.55,77.09",
           "alight_latlon": "26.82,77.92",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer wanted to confirm if airport charges were included in their fare for a pickup from Delhi airport Terminal 3, as the driver was asking for additional charges. The agent confirmed that airport entry charges were included but mentioned that parking charges might not be. The conversation included a discussion about whether the charges being asked by the driver were for parking or pickup, but the agent assured the customer that the booking included necessary charges. The agent offered to coordinate with the vendor team and would call back.\n\nCustomer inquired about cancellation charges for an outstation taxi booking from Delhi to Dholpur due to a delayed flight. The advance payment made was 792, which is non-refundable. The customer confirmed they are not looking to cancel but wanted to understand the financial implications of the situation. The agent assured that the advance payment would remain as it is, and no additional cash would need to be paid if the customer does not cancel. The customer was satisfied with the information provided and thanked the agent."
@@ -3543,7 +3600,8 @@
           "arrived_latlon": "22.73,75.8",
           "boarded_latlon": "22.73,75.8",
           "alight_latlon": "23.18,75.77",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "The customer, Chinmay, contacted the agent regarding a cab booking where the cab number was different from what was expected. The pickup time was confirmed as 10:00 AM, and there was a discussion about the professionalism of the driver and the need for updated information regarding the cab details. The customer expressed dissatisfaction with the service and the lack of communication about changes. The agent requested the customer to provide a picture of the cab and the correct number, which the customer did. The agent promised to follow up via email and validate the information with their team.\n\nThe customer inquired about a cab booked from Indore to Uchchayen, expressing concerns about the professionalism of the driver since a female passenger would be traveling. The agent reassured the customer about the driver's authorization and the safety of the trip. The call included confirmation that the vendor team was informed about the female passenger traveling. The customer expressed satisfaction with the provided information and ended the call positively.\n\nThe customer received a message about a change in driver details but did not receive updated information. The agent confirmed that the assigned driver would still be the same, and the change was due to a technical issue. The call was placed on hold while the agent checked with the vendor, who reassured that the originally assigned driver would arrive as planned. The customer expressed gratitude at the end of the call."
@@ -3624,7 +3682,8 @@
           "flight_number": "AI2744",
           "flight_departure_time": "2026-03-16 02:20:00",
           "flight_date": "2026-03-16",
-          "is_flight_early": 1
+          "is_flight_early": 1,
+          "vendor_name": "ezfleet"
         }
       ],
       "comments": "Customer reported a 20-minute wait for a cab despite booking a zero waiting time service. The flight had landed at 9:38 AM, and the customer expressed frustration over the delay and poor communication regarding driver assignment. The agent confirmed it would take an additional 5 to 10 minutes to update driver details and 20 to 30 minutes for the driver to arrive, which the customer found unacceptable. The conversation ended with the agent offering to call back with updates.\n\nCustomer, Aishwarya, requested to cancel a pre-booked cab after waiting for over 30 minutes due to the driver not arriving on time. She expressed frustration as this was her first experience facing such an issue with the service. The agent confirmed the pickup was scheduled for 10:38, and after some back and forth, the agent agreed to initiate the refund process within 48 hours. Aishwarya mentioned that she had already booked an alternate cab and insisted on a refund.\n\nThe customer, Aishwarya, inquired about a prepaid taxi service that had not arrived as expected. She expressed frustration about the delay, stating that the driver usually arrives earlier than scheduled. The agent assured her that they would check the issue and update her in about 10-15 minutes. Aishwarya was waiting in the parking area and requested the driver to arrive earlier than the scheduled pickup time of 10:38."
@@ -3703,7 +3762,8 @@
           "arrived_latlon": "15.53,73.77",
           "boarded_latlon": "15.53,73.77",
           "alight_latlon": "15.27,73.96",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "eroovo"
         }
       ],
       "comments": "The customer, Anup Dikshit, inquired about the total amount due for a car rental booked for a trip to Madgaon. The initial fare was ₹2658, with ₹578 already paid, leaving ₹2080 to be paid to the driver. However, the driver claimed an additional charge of ₹3000, stating it was due to a hotel-to-hotel booking rather than a one-way trip. The customer disputed this, insisting he booked a one-way trip and had not exceeded the kilometers. After a lengthy discussion, the customer was informed about the extra kilometer charges and was advised to pay the driver the disputed amount of ₹3520. The agent offered to raise a concern regarding the matter and requested the customer to share payment proof via email. The total amount mentioned was ₹3520, with the current due amount for the driver being ₹3500."
@@ -3782,7 +3842,8 @@
           "flight_number": "6E5106",
           "flight_departure_time": "2026-03-16 08:50:00",
           "flight_date": "2026-03-16",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "wticabs"
         }
       ],
       "comments": "Customer Madhuri is at Srinagar airport and has booked a cab which the driver is not responding to. The customer is frustrated as it has been over half an hour without any assistance from the driver. The agent is trying to help by contacting the driver."
@@ -3859,7 +3920,8 @@
           "total_driver_charge": 0.0,
           "started_latlon": "17.24,78.43",
           "arrived_latlon": "17.24,78.43",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer named Ravi called regarding a cab booking from Hyderabad to the airport, scheduled for a pickup at 10:30. The assigned driver informed Ravi that he had just received the assignment and was still in Hyderabad, causing a significant delay. Ravi decided to cancel the booking as he could not wait any longer and had made alternate arrangements. The agent confirmed that the booking would be handled by a higher team for cancellation and assured Ravi that a refund would be processed within 48 hours.\n\nCustomer Ravi called regarding a cancelled cab booking in Hyderabad for yesterday at 10:30 AM. He is seeking the status of his refund after making a separate booking based on the advice of an advisor. The agent informed him that the issue is being processed and requested 48 hours for a resolution. Customer expressed concern about the timeframe as it has already been 24 hours since the incident. The agent indicated they will follow up and close a duplicate ticket to avoid confusion."
@@ -3942,7 +4004,8 @@
           "flight_number": "6E6276",
           "flight_departure_time": "2026-03-16 12:25:00",
           "flight_date": "2026-03-16",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "milodrive"
         }
       ],
       "comments": "The customer, Satish, called regarding a cab service he used from the airport. He raised two main issues: a ₹120 toll charge that he believes should not have been included as his route did not go through a toll gate, and that he booked a specific vehicle type but received a different one. The agent confirmed the issues and stated that they would validate the concerns with the relevant department and call back within 24 hours."
@@ -4026,7 +4089,8 @@
           "flight_number": "6E5238",
           "flight_departure_time": "2026-03-15 16:10:00",
           "flight_date": "2026-03-15",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "palawat"
         }
       ],
       "comments": "The customer, Sudhanshu, called to discuss a taxi booking to pick him up at 11:45 from Jaipur International Airport to the city. He expressed concern about extra charges for waiting and distance, which he believed were not justified. The agent offered to connect with the driver for clarification and placed the call on hold to do so. The conversation included some informal exchanges in Hindi.\n\nCustomer experienced a delay with the driver who arrived 30 minutes late and took the customer’s OTP before leaving them outside the airport. The customer is frustrated about the inconvenience and is seeking compensation, not just a refund. The agent mentioned they would highlight the issue to the concerned department and requested the customer send photographs for validation."
@@ -4104,7 +4168,8 @@
           "started_latlon": "28.54,77.12",
           "boarded_latlon": "28.55,77.09",
           "alight_latlon": "26.89,81.0",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer completed a trip from Delhi to Lucknow via cab and was charged for toll taxes, despite being told on the booking application that such charges were included in the fare. The agent mentioned that expressway toll charges are not part of the voucher and requested the customer to provide payment proof to highlight the concern for fare adjustment. The customer expressed frustration over the lack of clarity regarding the inclusion of expressway tolls in the fare. The agent assured that an email would be sent to the customer to follow up on the issue.\n\nThe customer inquired about a trip booked from Delhi to Lucknow, specifically regarding toll charges and inclusions. The agent clarified that toll charges are included when taking the National Highway, but are not included if the customer chooses to take the Expressway. The customer acknowledged the information and expressed satisfaction with the explanation. No further issues were raised during the call."
@@ -4186,7 +4251,8 @@
           "arrived_latlon": "13.05,80.21",
           "boarded_latlon": "13.06,80.21",
           "alight_latlon": "13.07,80.18",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "The customer raised a dispute regarding a transportation service, stating that the car was not clean and the driver was unprofessional. The customer requested to initiate a cancellation and refund. The agent confirmed that the cancellation could not be processed immediately as the customer had already boarded the cab. The agent assured the customer that they would highlight the issue to the relevant team and that a resolution would be provided within 24 to 48 hours. The customer requested a confirmation email regarding the complaint and cancellation, which the agent agreed to send. The agent also mentioned that if any fault was found with the driver, a refund would be processed after validation.\n\nThe customer booked a cab from Chennai to Karaikal scheduled for 6:00 AM but encountered issues with the cleanliness of the vehicle and the professionalism of the driver. The customer requested an alternate vehicle due to these concerns. The agent suggested that the customer share pictures of the cab to validate the issues before proceeding with an alternate arrangement. The agent indicated that an update would be provided within 48 hours after consulting with the vendor team. The customer expressed urgency for travel but was informed that the process would take some time, with a follow-up call promised within 20 minutes.\n\nThe customer reported that the vehicle sent to them was not clean and requested a cancellation while wanting to continue the trip with an alternate car. The agent informed the customer that they would check with the vendor team and asked the customer to hold for about 5 to 7 minutes. The agent later confirmed they would arrange an alternate cab and would call back in 20 to 30 minutes."
@@ -4269,7 +4335,8 @@
           "flight_number": "AI2817",
           "flight_departure_time": "2026-03-15 11:00:00",
           "flight_date": "2026-03-15",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "eroovo"
         }
       ],
       "comments": "The customer inquired about an extra charge of ₹120 on a recent trip from the airport to the hotel. The agent confirmed that the driver charged the extra amount due to the application showing it was necessary after the trip. The customer requested clarification on the reason for the charge and agreed to provide payment proof for escalation. The agent promised to send an email for further assistance."
@@ -4351,7 +4418,8 @@
           "arrived_latlon": "28.56,77.12",
           "boarded_latlon": "28.55,77.12",
           "alight_latlon": "29.24,79.54",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "eroovo"
         }
       ],
       "comments": "Customer Akshay is inquiring about a booking for an electric car from Delhi to Haldwani but has been assigned a CNG vehicle. He is asking for a refund of the fare difference between the electric and CNG cars. The agent confirms the booking and puts the customer on hold to verify details with the driver. The customer agrees to travel in the CNG vehicle but insists on receiving a refund for the fare difference, and the agent promises to check the fare difference and call back within half an hour."
@@ -4431,7 +4499,8 @@
           "arrived_latlon": "28.56,77.12",
           "boarded_latlon": "28.56,77.12",
           "alight_latlon": "27.48,77.7",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "The customer is trying to book a cab and is frustrated with the delay in getting a driver assigned. The agent, Avinash, assures the customer that they are working on it and provides the driver's contact number. The customer expresses dissatisfaction with the wait time and is concerned about the reliability of the service. The agent suggests waiting for another 10-15 minutes for the driver to call back and assures the customer they will follow up. The conversation mainly revolves around the issues with the cab booking and the customer’s impatience with the situation.\n\nCustomer Rajesh Sharma is inquiring about a cab booking for pickup scheduled at 10:45. He has not received any details regarding the cab. The agent apologizes for the inconvenience and checks for updates. The vendor team is currently unresponsive, and the agent requests 5 to 10 minutes to connect with them to resolve the issue.\n\nCustomer expressed frustration over repeated issues with cab bookings, including drivers not responding and incorrect phone numbers. Customer mentioned this was the third time calling regarding the issue and was kept on hold multiple times during the call."
@@ -4513,7 +4582,8 @@
           "flight_number": "6E6168",
           "flight_departure_time": "2026-03-18 16:35:00",
           "flight_date": "2026-03-18",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxida"
         }
       ],
       "comments": "Customer booked a cab service for pickup on 22nd March from Debolim Goa airport to Taj Cidade de Goa heritage. Booking ID ends with 4691. Initially due amount was ₹614, but the customer was asked to pay an additional ₹200 for waiting charges due to a flight delay of one hour. The agent confirmed that the waiting charges will be refunded after the customer pays the driver. The customer agreed to pay the driver the ₹200 and was informed that a refund for the waiting charges would be processed shortly."
@@ -4594,7 +4664,8 @@
           "arrived_latlon": "19.02,72.84",
           "boarded_latlon": "19.02,72.82",
           "alight_latlon": "18.52,73.86",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer, Rajesh Shah, is discussing a car booking to Pune with the agent. The customer claims that the driver is demanding toll charges for the Atal Setu toll, which the customer believes should be included based on their booking with Makemytrip that states all tolls are included. The agent explains that while national highway tolls are included, expressway tolls may require additional payment. The conversation involves confusion regarding the route and toll charges, with the customer asserting that the Atal Setu toll should be part of the package. The customer mentions a previous booking experience where there were no issues and everything was included. The call ends with the agent asking the customer to provide payment proof for further assistance. No specific seat numbers, travel dates, date change charges, or cancellation fees are mentioned."
@@ -4673,7 +4744,8 @@
           "arrived_latlon": "22.56,88.35",
           "boarded_latlon": "22.56,88.35",
           "alight_latlon": "22.56,88.35",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer, Arindam Sharma, called regarding a cab booking for a pickup at 8:30 AM for a trip to Mandarmani. The driver informed that there was a puncture and it would take an additional 49 minutes. The agent confirmed the booking and mentioned they would follow up regarding the driver's situation, asking for 10 minutes to resolve the issue."
@@ -4754,7 +4826,8 @@
           "total_driver_charge": 297.0,
           "started_latlon": "17.67,83.0",
           "arrived_latlon": "17.82,83.36",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a cab from Visakhapatnam to Kakinada, but the cab that arrived had a different number. The agent confirmed the pickup time and cab details. The customer expressed concern about their family traveling in a cab with a different number. The total fare was 4300, with 875 paid already, leaving a remaining balance of 3425. The agent assured the customer that this is the only amount due, barring any extra kilometers or toll charges. The agent promised to follow up within 30 minutes and requested the customer to send a picture of the cab for validation."
@@ -4835,7 +4908,8 @@
           "arrived_latlon": "28.51,77.23",
           "boarded_latlon": "28.51,77.23",
           "alight_latlon": "26.96,75.72",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a diesel 6-seater car but received a CNG car without a roof. Customer insists they paid for the diesel car and is frustrated with the situation. Agent informs customer that they need to check with the supplier team and will call back in 10 to 15 minutes. Customer expresses urgency and concerns about waiting charges, to which the agent assures them there will be no waiting charge."
@@ -4916,7 +4990,8 @@
           "arrived_latlon": "11.34,76.71",
           "boarded_latlon": "11.34,76.71",
           "alight_latlon": "13.2,77.71",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "gozo"
         }
       ],
       "comments": "The customer called regarding issues with their cab booking, expressing dissatisfaction with the vehicle's condition, which was dirty and had a cracked windscreen. The customer reached Mysore and mentioned that they could not cancel their trip at the last moment. They were asked to take photos of the cab's condition to raise a concern for compensation. The customer also reported being charged 3300 for refueling, which was not discussed with the agent beforehand. The agent assured the customer that their concerns would be escalated and a callback would occur within 48 hours after receiving the photos."
@@ -4995,7 +5070,8 @@
           "arrived_latlon": "12.95,77.63",
           "boarded_latlon": "12.95,77.63",
           "alight_latlon": "12.95,77.63",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer, Dhiren, is disputing inflated charges from a driver for toll and permit fees after completing a trip. The driver is asking for ₹2300 for the permit and ₹1800 for tolls, while the customer believes the legitimate costs should be around ₹100 for the permit and ₹500 for tolls based on online information. The agent is checking with the vendor to resolve the issue."
@@ -5074,7 +5150,8 @@
           "arrived_latlon": "23.79,91.28",
           "boarded_latlon": "23.79,91.28",
           "alight_latlon": "23.79,91.28",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxibazaar"
         }
       ],
       "comments": "Customer had a trip in Agartala that was supposed to start at 11:00 AM but the car arrived 20-25 minutes late. The customer was provided with a CNG car instead of the requested diesel car, which caused inconvenience as there was no space for luggage. The driver was uncooperative and the contact information provided was incorrect. The customer expressed dissatisfaction and requested compensation for the issues faced. The trip was completed, and the customer mentioned they would send photographic evidence of the car. The agent apologized and assured the customer that the issue would be escalated within 48 hours."
@@ -5153,7 +5230,8 @@
           "arrived_latlon": "28.65,77.37",
           "boarded_latlon": "28.65,77.37",
           "alight_latlon": "29.33,73.91",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a taxi from Ghaziabad to Surat through MakeMyTrip, but received an old petrol plus CNG vehicle instead of the diesel SUV they had booked. The customer expressed discomfort with the vehicle and requested a change. The agent confirmed that the cab provided was the only option available at the time of booking. The customer was unhappy with the situation and felt the booking system should filter options better. The customer provided a contact number (999-297-5595) for a third party involved in the booking. They discussed the fare of 10,700 INR for the booking, but the customer felt they were not getting the service they paid for and mentioned dissatisfaction with the booking process. The call ended with the agent agreeing to further investigate the issue with the vendor team.\n\nCustomer booked a car from Ghaziabad to Suratgarh through Makemytrip but is facing issues with the car provided, which is not as per their request. They wanted a diesel car but received a petrol and CNG vehicle, and the customer expressed dissatisfaction with the comfort and condition of the car. They requested an alternate vehicle due to these issues. The agent is trying to assist by confirming an alternate vehicle and addressing the driver's behavior. There are no specific details about passenger seat numbers, travel dates, date change charges, cancellation fees, or fare differences mentioned in the conversation."
@@ -5234,7 +5312,8 @@
           "arrived_latlon": "28.53,77.15",
           "boarded_latlon": "28.53,77.15",
           "alight_latlon": "28.53,77.14",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "wticabs"
         }
       ],
       "comments": "Customer booked a cab from Delhi to Agra and initially expected to pay ₹4200 including taxes. However, after the trip, they were informed of an additional charge of ₹1300 for extra kilometers traveled (71 km extra). Total payments made were ₹800 prior to the trip and ₹6852 after the trip, totaling ₹7652. Customer is seeking a refund for the extra charge and the ₹800 payment, which was not included in the original fare. The agent confirmed that they will raise the concern for the refund and will call back within 48 hours regarding the approval."
@@ -5314,7 +5393,8 @@
           "arrived_latlon": "28.51,77.41",
           "boarded_latlon": "28.51,77.41",
           "alight_latlon": "26.84,80.87",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer Anandu is frustrated with the cab service booked through MakeMyTrip, as the driver is not answering calls and is delayed by 40 minutes for a 7:00 AM pickup. The customer expresses dissatisfaction with the professionalism and the mapping system's inaccuracies. The agent attempted to connect the customer with the driver, who stated he would arrive in 15 minutes. The customer is concerned about his elderly parents traveling and the driver’s delay."
@@ -5395,7 +5475,8 @@
           "arrived_latlon": "26.32,73.12",
           "boarded_latlon": "26.32,73.12",
           "alight_latlon": "26.87,70.87",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "The customer, Sanjay Mehta, reached the drop location for a cab ride from Jodhpur to Jaisalmer, which was supposed to be Club Mahindra Resort. However, the system only reflected 'Jaisalmer' as the drop point, leading to confusion and extra charges for the distance. The customer insisted that the full address was provided at the time of booking and expressed frustration about being charged for the extra kilometers. The customer was informed that the extra charge would be calculated based on the distance traveled and that waiting time would also be included in the final invoice. The customer requested an official invoice for company reimbursement and was assured that all details, including waiting time, would be reflected in the final bill. The conversation ended with the customer agreeing to complete the trip and wait for further communication regarding the charges."
@@ -5474,7 +5555,8 @@
           "arrived_latlon": "12.91,77.58",
           "boarded_latlon": "12.9,77.58",
           "alight_latlon": "13.2,77.7",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "taxida"
         }
       ]
     },
@@ -5552,7 +5634,8 @@
           "arrived_latlon": "28.4,77.07",
           "boarded_latlon": "28.4,77.07",
           "alight_latlon": "28.4,77.07",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer booked a cab from Gurgaon to Ramnagar but the driver did not show up at the scheduled time of 6:00 AM, causing the customer to arrange an alternate cab costing ₹1000. The customer expressed safety concerns regarding the driver and requested compensation for the inconvenience. The agent acknowledged the issue and promised to coordinate with the vendor team. The customer confirmed that the original booking started on 4th March and the current trip was meant to include a short trip to a safari point."
@@ -5633,7 +5716,8 @@
           "arrived_latlon": "22.3,70.8",
           "boarded_latlon": "22.3,70.8",
           "alight_latlon": "22.38,71.03",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer Suresh Agarwal called regarding a cab booking from Rajkot to Somnath. He received driver details in the app but could not connect with the driver as his phone was switched off. The agent placed the call on hold to check with the vendor team, who confirmed that a callback from the driver would be arranged within the next 15 minutes. The agent promised to follow up in that time.\n\nCustomer Suresh Agarwal is frustrated with the delay in the arrival of the driver, stating he has been waiting for 45 minutes and has been calling since 6:30 AM, with the current time being 7:15 AM. The agent apologized for the inconvenience and mentioned that they are checking with the vendor.\n\nCustomer is waiting for a driver detail but did not provide any additional information or request."
@@ -5712,7 +5796,8 @@
           "arrived_latlon": "30.13,78.32",
           "boarded_latlon": "30.13,78.32",
           "alight_latlon": "28.51,76.99",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "savaari"
         }
       ],
       "comments": "Customer Kabir is traveling from Rishikesh to Gurgaon and is being asked to pay toll charges by the cab driver. Customer insists that the toll charges are included in the booking. Agent checks with the driver and informs the customer that the driver claims the customer preferred a different route, leading to additional toll charges. Customer disputes this, stating the route shown in the app is the same as the one taken by the driver. After a lengthy discussion, the issue is escalated to a supervisor, who confirms that the toll is for the Dwarka Expressway and not included in the booking. The customer argues that it is a National Highway toll and requests a refund. The supervisor agrees to provide a refund after the payment for the toll is made. The customer will send a screenshot of the payment for further processing. The conversation ends with the customer agreeing to send the necessary information for the refund to be processed.\n\nThe conversation involved a customer discussing a recent trip from Gurgaon to Rishikesh and back. The customer raised multiple concerns including the attitude of the driver, who misbehaved, and an incident where the car was stopped by goons on the Meerut Expressway. The customer mentioned the driver asking for extra money for tolls that should have been included in the booking. The trip took 9 hours, and the customer expressed concerns for their safety. The agent acknowledged the complaints and promised to escalate the issue to the concerned team, stating it would take 24 to 48 hours for a resolution and would follow up with an email."
@@ -5792,7 +5877,8 @@
           "arrived_latlon": "12.98,80.17",
           "boarded_latlon": "12.98,80.17",
           "alight_latlon": "12.84,79.7",
-          "is_flight_early": 0
+          "is_flight_early": 0,
+          "vendor_name": "eroovo"
         }
       ]
     }

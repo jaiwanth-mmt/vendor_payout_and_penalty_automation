@@ -64,8 +64,22 @@ export type AgentSummary = {
   high_confidence_recoverable_amount: number;
   top_complaint_drivers: string[];
   category_breakdown: Array<Record<string, string | number>>;
+  top_vendors_by_penalty: Array<{
+    vendor_name: string;
+    case_count: number;
+    total_recoverable: number;
+    top_subcategories: VendorSubcategorySummary[];
+  }>;
+  top_subcategories_by_penalty: VendorSubcategorySummary[];
+  top_subcategories_by_count: VendorSubcategorySummary[];
   missing_data_hotspots: string[];
   recommended_actions: string[];
+};
+
+export type VendorSubcategorySummary = {
+  subcategory: string;
+  case_count: number;
+  total_recoverable: number;
 };
 
 export type EvidenceItem = {
@@ -106,6 +120,8 @@ export type AgentCase = {
   booking_id: string;
   sub_category: string;
   remarks: string;
+  comments: string;
+  vendor_name: string;
   recoverable_amount: number;
   row_index: number;
   review_status: string;

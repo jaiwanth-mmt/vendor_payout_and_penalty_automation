@@ -1,6 +1,6 @@
 # Agentic Loss Recovery Copilot
 
-React + FastAPI workflow for converting a QlikSense loss recovery workbook into an evidence-backed Cab Ops recovery package. The app builds a Cab Ops final XLSX with booking-level traceability while agentically investigating every booking, collecting Incabs/Redash-style evidence, scoring confidence, routing review cases, and producing audit artifacts.
+React + FastAPI workflow for converting a QlikSense loss recovery workbook into a Cab Ops recovery package. The app builds a Cab Ops final XLSX with booking-level traceability while agentically reviewing every booking from a strict source hierarchy: `comments`, then `Remarks`, then `Sub Category`.
 
 ## Project Layout
 
@@ -84,13 +84,13 @@ Generated API artifacts are written under `backend/.runtime/`. Demo fixtures liv
 The backend creates an in-memory job, writes temporary artifacts under `backend/.runtime/`, splits prepared rows by cleaned subcategory, and returns a downloadable ZIP package. Each package contains prepared category workbooks, processed category workbooks, `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, and `agent_summary.json`.
 
 All processed subcategory workbooks include fare, distance, toll, charge, driver-charge, comment fields from tracking reports, and a generated `message` complaint-category column.
-Cab Delay currently adds Incabs timing evidence, call comments, generated Incabs insights, and Incabs/comment summaries when Azure OpenAI is configured.
+Cab Delay currently adds Incabs timing fields, call comments, generated Incabs insights, and Incabs/comment summaries when Azure OpenAI is configured.
 Extra Money Taken adds trip type and comment fields from tracking reports.
-Fulfillment Not Done adds booking/tracking status, call comments, and formatted Incabs timing evidence.
+Fulfillment Not Done adds booking/tracking status, call comments, and formatted Incabs timing fields.
 Lower Category Vehicle adds vehicle category fields from tracking reports plus customer booked/received vehicle values
 extracted from comments.
 Other subcategories add only the shared tracking amount/comment fields until their custom processors are added.
-The agent layer creates normalized claim cases, gathers structured evidence, runs specialist agents for Cab Delay, Extra Money Taken, Fulfillment Not Done, and Lower Category Vehicle, routes decisions through a Judge Agent, and writes portfolio recommendations.
+The agent layer creates normalized claim cases, selects exactly one decision source in this order (`comments` -> `Remarks` -> `Sub Category`), runs a specialist decision, routes it through a Judge Agent, and writes portfolio recommendations. Agent decisions do not inspect timing, fare, driver status, vehicle, tracking, or payment fields; those fields remain workbook enrichment/output data only.
 The frontend shows subcategory progress while processing runs, including Cab Delay insight and summary counters, plus an agent cockpit with confidence, review queue, evidence cards, trace steps, and portfolio actions.
 
 The expected demo path for the bundled workbook produces 71 prepared rows across 9 subcategories.
@@ -101,10 +101,10 @@ The expected demo path for the bundled workbook produces 71 prepared rows across
 2. Watch the timeline move from workbook parsing into subcategory processing.
 3. Open the Agentic Loss Recovery Copilot panel:
    - auto-ready cases show high-confidence recovery candidates
-   - review queue cases show missing or partial evidence
+   - review queue cases show missing, contradicted, or partial source text
    - each booking drawer shows evidence and agent trace
 4. Download:
    - `final_output.xlsx` for existing Cab Ops flow
-   - `agent_audit.xlsx` for evidence-backed decisions
+   - `agent_audit.xlsx` for source-backed decisions
    - `review_queue.xlsx` for human review
    - the ZIP package for all artifacts

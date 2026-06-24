@@ -11,7 +11,15 @@ type CategoryPreviewProps = {
   isComplete: boolean;
 };
 
-const KEY_PREVIEW_COLUMNS = ["Booking ID", "Sub Category", "Recoverable", "Remarks", "Comments", "message"];
+const KEY_PREVIEW_COLUMNS = [
+  "Booking ID",
+  "Sub Category",
+  "vendor_name",
+  "Recoverable",
+  "Remarks",
+  "Comments",
+  "message",
+];
 const NARRATIVE_COLUMN_MARKERS = ["comment", "insight", "message", "remark", "summary"];
 const EXPANDABLE_TEXT_LENGTH = 150;
 const CATEGORY_PAGE_SIZE = 5;

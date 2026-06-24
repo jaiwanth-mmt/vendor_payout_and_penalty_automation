@@ -19,6 +19,7 @@ from backend.app.domain.tracking_common import (
     COMPLAINT_AGAINST_VALUE,
     TITLE_COLUMN,
     TITLE_VALUE,
+    VENDOR_NAME_COLUMN,
 )
 from backend.app.services.pipeline import FINAL_EXPORT_COLUMNS
 
@@ -50,6 +51,7 @@ def write_tracking_json(path: Path) -> None:
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b1",
+                        "vendor_name": "savaari",
                         "order_reference_number": "B1",
                         "start_time": "2026-03-19 04:30:00",
                         "driver_started": "2026-03-19 10:20:00",
@@ -85,10 +87,10 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
                     "complaint_categories": ["Cab Delay"],
                     "confidence": 0.91,
                     "recommended_recovery_amount": amount,
-                    "rationale": "API mock LLM approved Cab Delay based on cited evidence.",
+                    "rationale": "API mock LLM approved Cab Delay based on selected source text.",
                     "recommended_action": "Ready for Cab Ops recovery package",
                     "review_status": "auto_ready",
-                    "review_reason": "API mock LLM judge approved the cited evidence.",
+                    "review_reason": "API mock LLM judge approved the selected source.",
                     "evidence_ids": evidence_ids,
                 }
             )
@@ -136,7 +138,23 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert payload["metrics"]["final_output_rows"] == 1
         assert payload["case_counts"]["total_cases"] == 1
         assert payload["agent_summary"]["case_counts"]["total_cases"] == 1
-        assert payload["agent_progress"][-1]["agent"] == "Portfolio Summary Agent"
+        assert payload["agent_summary"]["top_vendors_by_penalty"] == [
+            {
+                "vendor_name": "savaari",
+                "case_count": 1,
+                "total_recoverable": 100.0,
+                "top_subcategories": [
+                    {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 100.0},
+                ],
+            }
+        ]
+        assert payload["agent_summary"]["top_subcategories_by_penalty"] == [
+            {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 100.0},
+        ]
+        assert payload["agent_summary"]["top_subcategories_by_count"] == [
+            {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 100.0},
+        ]
+        assert payload["agent_progress"][-1]["agent"] == "Vendor Penalty Analysis Agent"
         assert payload["final_output"] == {
             "filename": "final_output.xlsx",
             "row_count": 1,
@@ -163,6 +181,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert category_preview_payload["rows"][0][COMPLAINT_AGAINST_COLUMN] == COMPLAINT_AGAINST_VALUE
         assert category_preview_payload["rows"][0][COMPLAINT_AGAINST_ID_COLUMN] == "dispatch-b1"
         assert category_preview_payload["rows"][0][TITLE_COLUMN] == TITLE_VALUE
+        assert category_preview_payload["rows"][0][VENDOR_NAME_COLUMN] == "savaari"
         assert category_preview_payload["rows"][0][INCABS_INSIGHT_COLUMN] == "API mock Incabs insight."
         assert category_preview_payload["rows"][0][INCABS_COMMENT_SUMMARY_COLUMN] == "API mock combined summary."
         assert category_preview_payload["rows"][0][MESSAGE_COLUMN] == "Cab Delay"

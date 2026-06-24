@@ -1,7 +1,7 @@
 # Agent Guide
 
 ## What This Project Does
-Agentic Loss Recovery Copilot converts a QlikSense loss recovery workbook into a ZIP package of per-subcategory workbooks and agentic review artifacts for cab-ops review. The backend filters and consolidates workbook rows, splits the prepared data by cleaned subcategory, runs category-specific processors, converts rows into claim cases, gathers structured evidence, runs specialist agents, verifies decisions with a Judge Agent, adds a generated complaint-category `message`, and packages prepared/processed XLSX files with a manifest. Cab Delay currently adds Incabs timing evidence, call comments, and optional Azure OpenAI explanations; other subcategories receive shared tracking fields plus agent metadata and the message classifier until their processors are added.
+Agentic Loss Recovery Copilot converts a QlikSense loss recovery workbook into a ZIP package of per-subcategory workbooks and agentic review artifacts for cab-ops review. The backend filters and consolidates workbook rows, splits the prepared data by cleaned subcategory, runs category-specific processors, converts rows into claim cases, selects one agent decision source in the strict order `comments` -> `Remarks` -> `Sub Category`, runs specialist agents, verifies decisions with a Judge Agent, adds a generated complaint-category `message`, and packages prepared/processed XLSX files with a manifest. Cab Delay currently adds Incabs timing fields, call comments, and optional Azure OpenAI explanations to processed workbooks; those tracking-derived fields remain workbook enrichment data and are not used by the agent decision flow.
 
 ## Project Map
 - `backend/app/main.py`: FastAPI routes and job lifecycle wiring.
@@ -13,7 +13,7 @@ Agentic Loss Recovery Copilot converts a QlikSense loss recovery workbook into a
 - `backend/app/domain/penalty_dataset.py`: loss-recovery workbook filtering, duplicate consolidation, and prepared output shaping.
 - `backend/app/domain/subcategories.py`: cleaned subcategory names, slug generation, and prepared row splitting.
 - `backend/app/domain/category_processors.py`: subcategory processor registry, output-column contracts, message enrichment, and processor dispatch.
-- `backend/app/domain/cab_delay_enrichment.py`: Cab Delay timing evidence, comments, and Azure OpenAI prompt/client helpers.
+- `backend/app/domain/cab_delay_enrichment.py`: Cab Delay timing fields, comments, and Azure OpenAI prompt/client helpers.
 - `backend/app/domain/`: other category-specific enrichment helpers.
 - `backend/app/integrations/`: MySQL tracking extraction and Redash comment clients.
 - `backend/app/core/`: repo paths and environment loading.
@@ -42,8 +42,9 @@ Agentic Loss Recovery Copilot converts a QlikSense loss recovery workbook into a
 5. Prepared rows are split into exact cleaned `Sub Category` XLSX files.
 6. Demo tracking data from `data/demo/tracking_reports_by_booking.json` is matched by Booking ID.
 7. Each subcategory processor writes its own processed XLSX; every processed workbook gets a `message` complaint-category column plus agent metadata, and Cab Delay adds timing/comment/summary columns.
-8. Agent cases are aggregated into `agent_audit.xlsx`, `review_queue.xlsx`, and `agent_summary.json`.
-9. The API stores runtime output under `backend/.runtime/jobs/` and exposes ZIP, final-output, audit, review-queue, and case-inspection endpoints.
+8. Agent review uses only the first available source among `comments`, `Remarks`, and `Sub Category`; it does not inspect driver timing, fare, status, vehicle, tracking, or payment fields.
+9. Agent cases are aggregated into `agent_audit.xlsx`, `review_queue.xlsx`, and `agent_summary.json`.
+10. The API stores runtime output under `backend/.runtime/jobs/` and exposes ZIP, final-output, audit, review-queue, and case-inspection endpoints.
 
 ## Runtime Progress
 - API jobs expose per-step unit counters and per-subcategory progress in `JobResponse`.
@@ -53,7 +54,7 @@ Agentic Loss Recovery Copilot converts a QlikSense loss recovery workbook into a
 ## Safe Edit Guidance
 - Keep API endpoints, response fields, and per-subcategory output contracts stable unless the user explicitly asks for a contract change.
 - Add or change subcategory processors in `backend/app/domain/category_processors.py`; keep category-specific helper logic in focused `backend/app/domain/` modules.
-- Add or change agent behavior in `backend/app/agents/`; specialist decisions should cite evidence IDs, score confidence, and route through the Judge Agent.
+- Add or change agent behavior in `backend/app/agents/`; specialist decisions should cite only the selected source evidence ID, score confidence, and route through the Judge Agent. Do not reintroduce timing, fare, status, vehicle, tracking, or payment fields into agent decisions.
 - Add workbook filtering/shaping rules in `backend/app/domain/penalty_dataset.py`; add subcategory naming/splitting rules in `backend/app/domain/subcategories.py`.
 - Keep high-level orchestration in `backend/app/services/pipeline.py`; do not put category business rules there.
 - Put final-output, agent audit/review workbooks, manifest, and ZIP changes in `backend/app/services/package_builder.py`; put paginated preview payload changes in `backend/app/main.py`.
