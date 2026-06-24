@@ -27,7 +27,6 @@ from backend.app.domain.cab_delay_enrichment import (
 )
 from backend.app.domain.complaint_message import (
     MESSAGE_COLUMN,
-    build_fallback_message,
     build_message_classification_prompt,
     build_message_from_response,
 )
@@ -389,6 +388,9 @@ def enrich_message_column(
         sub_category = row_text(output, index, "Sub Category")
         remarks = row_text(output, index, "Remarks")
         comments = row_text(output, index, COMMENTS_COLUMN)
+        if not (comments or remarks):
+            output.at[index, MESSAGE_COLUMN] = ""
+            continue
         prompt = build_message_classification_prompt(
             sub_category=sub_category,
             remarks=remarks,
@@ -408,16 +410,8 @@ def enrich_message_column(
                 comments=comments,
             )
         except Exception:
-            message = build_fallback_message(
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        output.at[index, MESSAGE_COLUMN] = message or build_fallback_message(
-            sub_category=sub_category,
-            remarks=remarks,
-            comments=comments,
-        )
+            message = ""
+        output.at[index, MESSAGE_COLUMN] = message
 
     return output
 
@@ -443,6 +437,8 @@ async def enrich_message_column_async(
     semaphore = asyncio.Semaphore(llm_concurrency)
 
     async def classify_row(index: int, sub_category: str, remarks: str, comments: str) -> tuple[int, str]:
+        if not (comments or remarks):
+            return index, ""
         prompt = build_message_classification_prompt(
             sub_category=sub_category,
             remarks=remarks,
@@ -458,16 +454,8 @@ async def enrich_message_column_async(
                 comments=comments,
             )
         except Exception:
-            message = build_fallback_message(
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        return index, message or build_fallback_message(
-            sub_category=sub_category,
-            remarks=remarks,
-            comments=comments,
-        )
+            message = ""
+        return index, message
 
     tasks = [asyncio.create_task(classify_row(*row)) for row in rows]
     for task in asyncio.as_completed(tasks):

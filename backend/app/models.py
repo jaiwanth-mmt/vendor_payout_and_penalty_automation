@@ -65,12 +65,20 @@ class CategoryPreviewResponse(BaseModel):
 class ReviewQueueItem(BaseModel):
     booking_id: str
     sub_category: str
+    message: str = ""
     recoverable_amount: float | int
     review_status: str
     decision: str
     confidence: float | int
     recommended_action: str
     review_reason: str
+    rationale: str = ""
+    source_used: str = ""
+    source_categories: str = ""
+    row_categories: str = ""
+    source_alignment_status: str = ""
+    source_alignment_reason: str = ""
+    evidence_ids: str = ""
 
 
 class ReviewQueuePageResponse(BaseModel):

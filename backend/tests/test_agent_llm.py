@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pandas as pd
 
@@ -41,6 +42,74 @@ def evidence_item(
     )
 
 
+def source_aligned_llm(prompt: str, _tokens: int, _effort: str) -> str:
+    if "Complaint category classification task." in prompt:
+        return json.dumps({"categories": categories_for_prompt(classification_subject(prompt))})
+
+    evidence_ids = list(dict.fromkeys(re.findall(r'"id":\s*"([^"]+)"', prompt)))[:3]
+    categories = source_categories_for_prompt(prompt) or categories_for_prompt(prompt)
+    status = "auto_ready" if evidence_ids else "missing_evidence"
+    return json.dumps(
+        {
+            "decision": "valid_penalty" if status == "auto_ready" else "needs_review",
+            "complaint_categories": categories,
+            "confidence": 0.91 if status == "auto_ready" else 0.55,
+            "recommended_recovery_amount": 100 if status == "auto_ready" else 0,
+            "rationale": "Mock LLM followed source alignment categories.",
+            "recommended_action": "Ready" if status == "auto_ready" else "Review",
+            "review_status": status,
+            "review_reason": "Mock LLM followed source alignment.",
+            "evidence_ids": evidence_ids,
+        }
+    )
+
+
+def categories_for_prompt(prompt: str) -> list[str]:
+    normalized = prompt.casefold()
+    categories: list[str] = []
+    if "paid amount refund" in normalized:
+        return []
+    if "cab delayed > 1 hour" in prompt or "more than 1 hour" in normalized:
+        categories.append("Cab Delayed > 1 Hour")
+    elif "cab delayed > 15 minutes" in prompt or "20 minutes" in normalized:
+        categories.append("Cab Delayed > 15 Minutes")
+    elif "cab delay" in normalized or "driver was late" in normalized or "delayed" in normalized:
+        categories.append("Cab Delay")
+    if "driver collected extra" in normalized or "extra cash" in normalized or "extra money" in normalized:
+        categories.append("Extra Money Taken")
+    if "lower category vehicle" in normalized:
+        categories.append("Low Category Vehicle")
+    if "vendor no show" in normalized or "did not arrive" in normalized:
+        categories.append("Vendor No Show")
+    return categories
+
+
+def classification_subject(prompt: str) -> str:
+    values: dict[str, str] = {}
+    for line in prompt.splitlines():
+        for label in ["Comments", "Remarks", "Sub Category"]:
+            prefix = f"{label}:"
+            if line.startswith(prefix):
+                values[label] = line.removeprefix(prefix).strip()
+
+    if values.get("Comments"):
+        return values["Comments"]
+    if values.get("Remarks"):
+        return values["Remarks"]
+    return values.get("Sub Category", "")
+
+
+def source_categories_for_prompt(prompt: str) -> list[str]:
+    match = re.search(r'"source_categories":\s*(\[[^\]]*\])', prompt)
+    if not match:
+        return []
+    try:
+        categories = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+    return [str(category) for category in categories]
+
+
 def test_build_claim_case_captures_vendor_name() -> None:
     row = pd.Series(
         {
@@ -49,6 +118,7 @@ def test_build_claim_case_captures_vendor_name() -> None:
             "Remarks": "Cab Delay",
             "Recoverable": 100,
             "comments": "Customer said driver was late.",
+            MESSAGE_COLUMN: "Cab Delay",
             "vendor_name": "savaari",
         }
     )
@@ -59,12 +129,21 @@ def test_build_claim_case_captures_vendor_name() -> None:
     missing_vendor_case = build_claim_case(missing_vendor_row, row_index=1)
 
     assert case.vendor_name == "savaari"
+    assert case.message == "Cab Delay"
     assert case.to_dict()["vendor_name"] == "savaari"
     assert missing_vendor_case.vendor_name == "Unknown vendor"
 
 
 def test_valid_specialist_llm_json_becomes_agent_decision() -> None:
-    case = ClaimCase("B1", "Extra Money Taken", "driver collected extra", 80, 0, comments="Customer said driver collected extra cash.")
+    case = ClaimCase(
+        "B1",
+        "Extra Money Taken",
+        "driver collected extra",
+        80,
+        0,
+        comments="Customer said driver collected extra cash.",
+        message="Extra Money Taken",
+    )
     case.evidence = [evidence_item("B1", "penalty"), evidence_item("B1", "comments"), evidence_item("B1", "fare")]
     calls: list[tuple[int, str]] = []
 
@@ -90,11 +169,19 @@ def test_valid_specialist_llm_json_becomes_agent_decision() -> None:
     assert case.specialist_decision.decision_source == "llm"
     assert case.specialist_decision.complaint_categories == ["Extra Money Taken"]
     assert case.specialist_decision.evidence_ids == ["B1:comments"]
-    assert calls == [(8192, "medium")]
+    assert calls == [(2048, "minimal"), (2048, "minimal"), (8192, "medium")]
 
 
 def test_invalid_specialist_llm_json_uses_fallback() -> None:
-    case = ClaimCase("B1", "Extra Money Taken", "driver collected extra", 80, 0, comments="Customer said driver collected extra cash.")
+    case = ClaimCase(
+        "B1",
+        "Extra Money Taken",
+        "driver collected extra",
+        80,
+        0,
+        comments="Customer said driver collected extra cash.",
+        message="Extra Money Taken",
+    )
     case.evidence = [evidence_item("B1", "penalty"), evidence_item("B1", "comments"), evidence_item("B1", "fare")]
 
     asyncio.run(
@@ -113,7 +200,10 @@ def test_invalid_specialist_llm_json_uses_fallback() -> None:
 
 def test_uncited_evidence_ids_are_rejected() -> None:
     case = ClaimCase("B1", "Cab Delay", "Cab Delay", 100, 0, comments="Customer said driver was late.")
-    case.evidence = [evidence_item("B1", "comments", text="Customer said driver was late."), evidence_item("B1", "timing")]
+    case.evidence = [
+        evidence_item("B1", "comments", text="Customer said driver was late."),
+        evidence_item("B1", "timing"),
+    ]
 
     async def llm(_prompt: str, _tokens: int, _effort: str) -> str:
         return json.dumps(
@@ -138,7 +228,15 @@ def test_uncited_evidence_ids_are_rejected() -> None:
 
 
 def test_judge_ignores_missing_timing_when_selected_source_exists() -> None:
-    case = ClaimCase("B9", "Cab Delay", "Cab Delay", 100, 0, comments="Customer said driver was late.")
+    case = ClaimCase(
+        "B9",
+        "Cab Delay",
+        "Cab Delay",
+        100,
+        0,
+        comments="Customer said driver was late.",
+        message="Cab Delay",
+    )
     case.evidence = [
         evidence_item("B9", "comments", text="Customer said driver was late."),
         evidence_item("B9", "timing", status="missing"),
@@ -181,7 +279,7 @@ def test_judge_ignores_missing_timing_when_selected_source_exists() -> None:
     assert case.judge_decision.decision_source == "llm"
     assert case.judge_decision.review_status == "auto_ready"
     assert case.judge_decision.evidence_ids == ["B9:comments"]
-    assert calls == [(8192, "high")]
+    assert calls == [(2048, "minimal"), (2048, "minimal"), (8192, "high")]
 
 
 def test_judge_promotes_low_confidence_selected_source_to_auto_ready() -> None:
@@ -192,6 +290,7 @@ def test_judge_promotes_low_confidence_selected_source_to_auto_ready() -> None:
         100,
         0,
         comments="Customer mentioned cab delay but did not give timing details.",
+        message="Cab Delay",
     )
     case.evidence = [evidence_item("B14", "comments", text=case.comments)]
     case.specialist_decision = AgentDecision(
@@ -232,7 +331,7 @@ def test_judge_promotes_low_confidence_selected_source_to_auto_ready() -> None:
     assert case.judge_decision.recommended_recovery_amount == 100
 
 
-def test_source_priority_comments_beat_remarks_and_subcategory() -> None:
+def test_comments_mismatch_routes_to_review() -> None:
     df = pd.DataFrame(
         [
             {
@@ -241,44 +340,276 @@ def test_source_priority_comments_beat_remarks_and_subcategory() -> None:
                 "Remarks": "Cab Delay",
                 "Recoverable": 100,
                 "comments": "Customer said driver collected extra cash.",
+                MESSAGE_COLUMN: "Extra Money Taken",
             }
         ]
     )
 
     output, cases = asyncio.run(
-        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=None, llm_concurrency=1)
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
     )
 
-    assert cases[0]["evidence"][0]["id"] == "B10:comments"
     assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
-    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["review_status"] == "needs_review"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Extra Money Taken"]
+    assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
 
 
-def test_source_priority_remarks_beat_subcategory_when_comments_empty() -> None:
+def test_matching_comments_and_row_context_are_auto_ready() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B10",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra",
+                "Recoverable": 100,
+                "comments": "Customer said driver collected extra cash.",
+                MESSAGE_COLUMN: "Extra Money Taken",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
+    assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
+
+
+def test_comments_with_expected_and_extra_categories_are_auto_ready() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B10X",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra",
+                "Recoverable": 100,
+                "comments": "Customer said the cab was delayed and driver collected extra cash.",
+                MESSAGE_COLUMN: "Cab Delay + Extra Money Taken",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Cab Delay", "Extra Money Taken"]
+    assert output.loc[0, MESSAGE_COLUMN] == "Cab Delay + Extra Money Taken"
+
+
+def test_comment_booking_id_mismatch_routes_to_review() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC1234567890",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra",
+                "Recoverable": 100,
+                "comments": "For booking ID NC9999999999, customer said driver collected extra cash.",
+                MESSAGE_COLUMN: "Extra Money Taken",
+            }
+        ]
+    )
+
+    _output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "needs_review"
+    assert cases[0]["source_analysis"]["status"] == "booking_id_mismatch"
+
+
+def test_booking_words_do_not_create_false_id_mismatch() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC1234567890",
+                "Sub Category": "Cab Delay",
+                "Remarks": "Cab Delay",
+                "Recoverable": 100,
+                "comments": (
+                    "Customer called about a cab booking scheduled for 4 PM. "
+                    "The driver was delayed due to refueling and would arrive in 20 minutes."
+                ),
+                MESSAGE_COLUMN: "Cab Delayed > 15 Minutes",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["mentioned_booking_ids"] == []
+    assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert output.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 15 Minutes"
+
+
+def test_cab_delay_duration_categories_align_with_generic_cab_delay() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC1234567891",
+                "Sub Category": "Cab Delay",
+                "Remarks": "Cab Delay",
+                "Recoverable": 100,
+                "comments": "Customer said the cab was delayed for more than 1 hour.",
+                MESSAGE_COLUMN: "Cab Delayed > 1 Hour",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delayed > 1 Hour"]
+    assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
+    assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert output.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 1 Hour"
+
+
+def test_remarks_drive_reasoning_when_comments_empty() -> None:
     df = pd.DataFrame(
         [
             {
                 "Booking ID": "B11",
-                "Sub Category": "Cab Delay",
+                "Sub Category": "Extra Money Taken",
                 "Remarks": "driver collected extra cash",
                 "Recoverable": 80,
                 "comments": "",
+                MESSAGE_COLUMN: "Extra Money Taken",
             }
         ]
     )
 
     output, cases = asyncio.run(
-        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=None, llm_concurrency=1)
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
     )
 
-    assert cases[0]["evidence"][0]["id"] == "B11:remarks"
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
+    assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
+
+
+def test_remarks_take_priority_over_mismatched_subcategory() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B11X",
+                "Sub Category": "Cab Delay",
+                "Remarks": "driver collected extra cash",
+                "Recoverable": 80,
+                "comments": "",
+                MESSAGE_COLUMN: "Extra Money Taken",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
     assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
     assert cases[0]["review_status"] == "auto_ready"
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
 
 
-def test_source_priority_subcategory_is_final_fallback() -> None:
+def test_empty_remarks_uses_subcategory_for_alignment() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B11Y",
+                "Sub Category": "Cab Delay",
+                "Remarks": "",
+                "Recoverable": 80,
+                "comments": "Customer said driver collected extra cash.",
+                MESSAGE_COLUMN: "Extra Money Taken",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "needs_review"
+    assert cases[0]["source_analysis"]["comparison_source"] == "sub_category"
+    assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
+    assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
+
+
+def test_unmappable_remarks_can_still_auto_ready_when_subcategory_matches() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B11Z",
+                "Sub Category": "Vendor No Show",
+                "Remarks": "paid amount refund",
+                "Recoverable": 80,
+                "comments": "Customer said the vendor did not arrive.",
+                MESSAGE_COLUMN: "Vendor No Show",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["comparison_source"] == "remarks_or_sub_category"
+    assert cases[0]["source_analysis"]["remarks_categories"] == []
+    assert cases[0]["source_analysis"]["sub_category_categories"] == ["Vendor No Show"]
+    assert output.loc[0, MESSAGE_COLUMN] == "Vendor No Show"
+
+
+def test_row_context_llm_failure_routes_to_review_without_regex_fallback() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B11F",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra cash",
+                "Recoverable": 80,
+                "comments": "Customer said driver collected extra cash.",
+                MESSAGE_COLUMN: "Extra Money Taken",
+            }
+        ]
+    )
+
+    def failing_alignment_llm(prompt: str, _tokens: int, _effort: str) -> str:
+        if "Complaint category classification task." in prompt:
+            return "not json"
+        return source_aligned_llm(prompt, _tokens, _effort)
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(
+            df,
+            tracking_bookings={},
+            llm_generator=failing_alignment_llm,
+            llm_concurrency=1,
+        )
+    )
+
+    assert cases[0]["review_status"] == "needs_review"
+    assert cases[0]["source_analysis"]["row_categories"] == []
+    assert cases[0]["source_analysis"]["reason"] == (
+        "Remarks could not be classified by the LLM.; "
+        "Sub Category could not be classified by the LLM."
+    )
+    assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
+
+
+def test_subcategory_only_is_missing_evidence() -> None:
     df = pd.DataFrame(
         [
             {
@@ -295,10 +626,10 @@ def test_source_priority_subcategory_is_final_fallback() -> None:
         investigate_category_frame_async(df, tracking_bookings={}, llm_generator=None, llm_concurrency=1)
     )
 
-    assert cases[0]["evidence"][0]["id"] == "B12:sub_category"
-    assert cases[0]["final_decision"]["complaint_categories"] == ["Low Category Vehicle"]
-    assert cases[0]["review_status"] == "auto_ready"
-    assert output.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
+    assert cases[0]["source_analysis"]["row_categories"] == []
+    assert cases[0]["final_decision"]["complaint_categories"] == []
+    assert cases[0]["review_status"] == "missing_evidence"
+    assert output.loc[0, MESSAGE_COLUMN] == ""
 
 
 def test_operational_tracking_fields_do_not_affect_agent_decision() -> None:
@@ -306,7 +637,7 @@ def test_operational_tracking_fields_do_not_affect_agent_decision() -> None:
         [
             {
                 "Booking ID": "B13",
-                "Sub Category": "Cab Delay",
+                "Sub Category": "Extra Money Taken",
                 "Remarks": "driver collected extra cash",
                 "Recoverable": 80,
                 "comments": "",
@@ -315,6 +646,7 @@ def test_operational_tracking_fields_do_not_affect_agent_decision() -> None:
                 "cash_collected": 0,
                 "vehicle_type": "sedan",
                 "tracking status": "COMPLETED",
+                MESSAGE_COLUMN: "Extra Money Taken",
             }
         ]
     )
@@ -333,10 +665,17 @@ def test_operational_tracking_fields_do_not_affect_agent_decision() -> None:
     }
 
     output, cases = asyncio.run(
-        investigate_category_frame_async(df, tracking_bookings=tracking, llm_generator=None, llm_concurrency=1)
+        investigate_category_frame_async(
+            df,
+            tracking_bookings=tracking,
+            llm_generator=source_aligned_llm,
+            llm_concurrency=1,
+        )
     )
 
-    assert [item["id"] for item in cases[0]["evidence"]] == ["B13:remarks"]
+    evidence_ids = [item["id"] for item in cases[0]["evidence"]]
+    assert "B13:remarks" in evidence_ids
+    assert all("timing" not in evidence_id and "fare" not in evidence_id for evidence_id in evidence_ids)
     assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
     assert cases[0]["review_status"] == "auto_ready"
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
@@ -349,9 +688,9 @@ def test_portfolio_summary_uses_large_default_token_budget() -> None:
         calls.append((tokens, effort))
         return json.dumps(
             {
-                "executive_summary": "Portfolio summary from LLM.",
-                "top_complaint_drivers": ["Cab Delay: 1 case"],
-                "recommended_actions": ["Proceed with reviewed recoveries."],
+                "executive_summary": "Portfolio summary from LLM with $100 recoverable.",
+                "top_complaint_drivers": ["Cab Delay: $100 recoverable"],
+                "recommended_actions": ["Proceed with $100 recoveries."],
                 "missing_data_hotspots": [],
                 "category_breakdown": [{"category": "Cab Delay", "cases": 1, "recoverable": 100}],
             }
@@ -371,7 +710,9 @@ def test_portfolio_summary_uses_large_default_token_budget() -> None:
 
     summary = asyncio.run(build_portfolio_summary_async(cases, llm_generator=llm, llm_concurrency=1))
 
-    assert summary["executive_summary"] == "Portfolio summary from LLM."
+    assert summary["executive_summary"] == "Portfolio summary from LLM with ₹100 recoverable."
+    assert summary["top_complaint_drivers"] == ["Cab Delay: ₹100 recoverable"]
+    assert summary["recommended_actions"] == ["Proceed with ₹100 recoveries."]
     assert summary["top_vendors_by_penalty"][0]["vendor_name"] == "savaari"
     assert calls == [(4096, "medium")]
 
@@ -513,7 +854,7 @@ def test_agent_progress_reports_completed_warning_and_failed_states() -> None:
     }
 
 
-def test_agent_decision_becomes_final_message() -> None:
+def test_llm_message_is_preserved_after_agent_decision() -> None:
     df = pd.DataFrame(
         [
             {
@@ -534,7 +875,11 @@ def test_agent_decision_becomes_final_message() -> None:
     }
 
     async def llm(prompt: str, _tokens: int, _effort: str) -> str:
-        evidence_ids = ["B5:comments", "B5:fare"] if "Agent specialist decision task." in prompt else ["B5:comments"]
+        evidence_ids = (
+            ["B5:comments", "B5:source_alignment"]
+            if "Agent specialist decision task." in prompt
+            else ["B5:comments"]
+        )
         return json.dumps(
             {
                 "decision": "valid_penalty",
@@ -553,5 +898,6 @@ def test_agent_decision_becomes_final_message() -> None:
         investigate_category_frame_async(df, tracking_bookings=tracking, llm_generator=llm, llm_concurrency=2)
     )
 
-    assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
+    assert output.loc[0, MESSAGE_COLUMN] == "Cab Delay"
+    assert cases[0]["review_status"] == "needs_review"
     assert cases[0]["final_decision"]["decision_source"] == "llm"

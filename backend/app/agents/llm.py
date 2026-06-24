@@ -25,7 +25,7 @@ ALLOWED_REVIEW_STATUSES: set[CaseReviewStatus] = {
 }
 ALLOWED_DECISIONS = {"valid_penalty", "needs_review", "invalid_penalty", "partial", "failed"}
 MAX_FIELD_VALUE_LENGTH = 420
-SOURCE_HIERARCHY = ("comments", "remarks", "sub_category")
+SOURCE_HIERARCHY = ("comments", "remarks", "sub_category", "source_alignment")
 
 
 class AgentLlmError(ValueError):
@@ -94,15 +94,16 @@ def build_specialist_prompt(
         [
             "Agent specialist decision task.",
             f"You are the {agent_name} for MakeMyTrip Cab Ops loss recovery.",
-            "Reason only over the selected source evidence provided in this payload.",
-            "The source priority is comments, then Remarks, then Sub Category.",
+            "Reason only over comments, Remarks, Sub Category, and source-alignment evidence provided in this payload.",
+            "Use comments as primary evidence when present. If comments are absent, use Remarks.",
+            "Treat Sub Category as supporting row context only; Sub Category alone is missing evidence.",
+            "Auto-ready requires overlap between the primary evidence categories and row categories.",
+            "Route booking-ID mismatches and category mismatches to needs_review.",
             "Do not use, infer from, request, or mention timing, fare, driver status, vehicle, tracking, or payment fields.",
             "Return only strict JSON matching required_json_schema. No markdown.",
             "Use complaint_categories only from allowed_complaint_categories.",
-            "Use evidence_ids only from the selected source evidence IDs. Cite every key fact with those IDs.",
-            "If selected source text exists, mark the penalty auto_ready unless that selected text explicitly says the penalty is wrong, false, resolved, denied, or invalid.",
-            "Do not route to needs_review only because the selected text is brief, vague, or lacks operational corroboration.",
-            "If comments, Remarks, and Sub Category are all missing, route to missing_evidence rather than auto_ready.",
+            "Use evidence_ids only from the provided source evidence IDs. Cite every key fact with those IDs.",
+            "If comments and Remarks are both missing, route to missing_evidence rather than auto_ready.",
             "recommended_recovery_amount must be between 0 and the case recoverable_amount.",
             "",
             json.dumps(payload, ensure_ascii=False),
@@ -132,13 +133,15 @@ def build_judge_prompt(
         [
             "Judge Agent verification task.",
             "You are the final verifier for a Cab Ops recovery recommendation.",
-            "Check whether the specialist decision is supported by the selected source evidence only.",
-            "The source priority is comments, then Remarks, then Sub Category.",
+            "Check whether the specialist decision follows the computed source-alignment evidence.",
+            "Comments are primary when present. Remarks are primary only when comments are absent.",
+            "Sub Category is supporting row context only; Sub Category alone is missing evidence.",
+            "Approve as auto_ready only when primary evidence categories overlap row categories and no booking-ID mismatch exists.",
+            "Route booking-ID mismatches and category mismatches to needs_review.",
             "Do not use, infer from, request, or mention timing, fare, driver status, vehicle, tracking, or payment fields.",
             "Return only strict JSON matching required_json_schema. No markdown.",
-            "Approve as auto_ready when selected source text exists and has no explicit invalid-penalty signal.",
-            "Do not route to review only because the selected text is brief, vague, or lacks operational corroboration.",
-            "Reject or route to review only when selected source text is missing, explicitly contradicted, uncited, or explicitly says the penalty is wrong, false, resolved, denied, or invalid.",
+            "Do not route to review only because the primary evidence is brief, vague, or lacks operational corroboration.",
+            "Reject or route to review when primary evidence is missing, mismatched, uncited, or explicitly says the penalty is wrong, false, resolved, denied, or invalid.",
             "Do not allow unsupported facts from the specialist rationale to become final facts.",
             "",
             json.dumps(payload, ensure_ascii=False),
@@ -164,6 +167,7 @@ def build_portfolio_prompt(*, fallback_summary: dict[str, Any]) -> str:
             "Use only the provided aggregate inputs. Do not invent suppliers, vendors, or source systems.",
             "Return only strict JSON matching required_json_schema. No markdown.",
             "Keep the executive summary concise and action-oriented.",
+            "All recoverable amounts are INR; use the rupee symbol ₹ and never use dollar notation.",
             "",
             json.dumps(payload, ensure_ascii=False),
         ]
@@ -277,12 +281,12 @@ def validate_portfolio_payload(payload: dict[str, Any], fallback_summary: dict[s
     for key in ["executive_summary"]:
         value = clean_text(payload.get(key))
         if value:
-            output[key] = value
+            output[key] = normalize_currency_text(value)
 
     for key in ["top_complaint_drivers", "recommended_actions", "missing_data_hotspots"]:
         values = string_list(payload.get(key))
         if values:
-            output[key] = values[:8]
+            output[key] = [normalize_currency_text(value) for value in values[:8]]
 
     breakdown = payload.get("category_breakdown")
     if isinstance(breakdown, list):
@@ -309,6 +313,10 @@ def validate_portfolio_payload(payload: dict[str, Any], fallback_summary: dict[s
     return output
 
 
+def normalize_currency_text(value: str) -> str:
+    return clean_text(value).replace("$", "₹")
+
+
 def case_payload(case: ClaimCase) -> dict[str, Any]:
     return {
         "booking_id": case.booking_id,
@@ -318,7 +326,7 @@ def case_payload(case: ClaimCase) -> dict[str, Any]:
 
 
 def evidence_packet(case: ClaimCase) -> list[dict[str, Any]]:
-    selected_evidence = selected_source_evidence(case)
+    selected_evidence = source_alignment_evidence(case)
     return [
         {
             "id": item.id,
@@ -333,24 +341,16 @@ def evidence_packet(case: ClaimCase) -> list[dict[str, Any]]:
     ]
 
 
-def selected_source_evidence(case: ClaimCase) -> list[Any]:
-    evidence_by_source: dict[str, Any] = {}
-    missing_source_items: list[Any] = []
+def source_alignment_evidence(case: ClaimCase) -> list[Any]:
+    source_items: list[Any] = []
     for item in case.evidence:
         source_field = clean_text(item.fields.get("source_field"))
         if source_field not in SOURCE_HIERARCHY:
             source_field = source_from_evidence_id(item.id)
-        if item.status == "missing" and item.id.endswith(":source"):
-            missing_source_items.append(item)
+        if item.source != "source_alignment" and source_field not in SOURCE_HIERARCHY:
             continue
-        if item.status != "available" or source_field not in SOURCE_HIERARCHY:
-            continue
-        evidence_by_source[source_field] = item
-
-    for source_field in SOURCE_HIERARCHY:
-        if source_field in evidence_by_source:
-            return [evidence_by_source[source_field]]
-    return missing_source_items[:1]
+        source_items.append(item)
+    return source_items
 
 
 def source_from_evidence_id(evidence_id: str) -> str:

@@ -354,7 +354,8 @@ def test_lower_category_vehicle_llm_failure_warns_and_leaves_values_blank(tmp_pa
     assert result.category_outputs[0]["status"] == "completed"
     assert output_df.loc[0, CUSTOMER_BOOKED_VEHICLE_COLUMN] == ""
     assert output_df.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == ""
-    assert output_df.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
+    assert output_df.loc[0, MESSAGE_COLUMN] == ""
+    assert output_df.loc[0, "agent_review_status"] == "needs_review"
     assert warnings == [
         {
             "code": "lower_category_vehicle_extraction_failed",
