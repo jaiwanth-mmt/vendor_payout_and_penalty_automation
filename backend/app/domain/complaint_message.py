@@ -93,6 +93,7 @@ def build_message_classification_prompt(*, sub_category: str, remarks: str, comm
             "Do not return any category that is not in the allowed list.",
             "Use comments as the primary evidence when present. If comments are empty, use remarks.",
             "Use Sub Category only as supporting context; never let it override the primary evidence.",
+            "Handle casing differences, minor spelling mistakes, abbreviations, and local wording before deciding.",
             "If the primary evidence does not map to an allowed category, return {\"categories\": []}.",
             (
                 "For cab delay, choose Cab Delayed > 1 Hour when the primary evidence says "
@@ -113,6 +114,56 @@ def build_message_classification_prompt(*, sub_category: str, remarks: str, comm
             json.dumps(ALLOWED_COMPLAINT_CATEGORIES, ensure_ascii=True),
             "",
             f"Primary evidence source: {primary_source}",
+            f"Sub Category: {sub_category}",
+            f"Remarks: {remarks}",
+            f"Comments: {comments}",
+        ]
+    )
+
+
+def build_message_repair_prompt(
+    *,
+    sub_category: str,
+    remarks: str,
+    comments: str,
+    previous_response: str,
+    failure_reason: str,
+) -> str:
+    primary_source = "comments" if comments.strip() else "remarks"
+    primary_text = comments.strip() or remarks.strip()
+    return "\n".join(
+        [
+            "Complaint category classification task.",
+            "Repair a previous complaint category classification that could not be used.",
+            "Return only strict JSON in this exact shape: {\"categories\": [\"Category\"]}",
+            "Use only categories from the allowed list. Do not return any other label.",
+            "Use comments as the primary evidence when present. If comments are empty, use remarks.",
+            "Use Remarks and Sub Category only as supporting context for spelling, wording, and disambiguation.",
+            "Handle casing differences, minor spelling mistakes, abbreviations, and local wording before deciding.",
+            "Do not guess from Sub Category when the primary evidence is unrelated, vague, or not a complaint.",
+            "If the primary evidence still cannot be mapped to an allowed category, return {\"categories\": []}.",
+            (
+                "For cab delay, choose Cab Delayed > 1 Hour when the primary evidence says "
+                "the delay was more than 1 hour or more than 60 minutes."
+            ),
+            (
+                "For cab delay, choose Cab Delayed by 30-60 Minutes only when the primary evidence "
+                "explicitly says 30-60 minutes or a delay from 30 through 60 minutes."
+            ),
+            (
+                "Choose Cab Delayed > 15 Minutes only when the primary evidence explicitly says "
+                "a delay greater than 15 minutes and it is not a 30-60 minute or >1 hour window."
+            ),
+            "If cab delay is present without a clear matching duration window, choose Cab Delay.",
+            "For multiple complaint categories, include every matching allowed category.",
+            "",
+            "Allowed categories:",
+            json.dumps(ALLOWED_COMPLAINT_CATEGORIES, ensure_ascii=True),
+            "",
+            f"Previous failure reason: {failure_reason}",
+            f"Previous response: {previous_response[:1000]}",
+            f"Primary evidence source: {primary_source}",
+            f"Primary evidence text: {primary_text}",
             f"Sub Category: {sub_category}",
             f"Remarks: {remarks}",
             f"Comments: {comments}",

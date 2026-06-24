@@ -29,6 +29,7 @@ from backend.app.domain.complaint_message import (
     MESSAGE_COLUMN,
     build_message_classification_prompt,
     build_message_from_response,
+    build_message_repair_prompt,
 )
 from backend.app.domain.extra_money_taken import (
     EXTRA_MONEY_TAKEN_ENRICHMENT_COLUMNS,
@@ -375,6 +376,120 @@ def row_text(df: pd.DataFrame, index: int, column: str) -> str:
     return str(value).strip()
 
 
+def build_message_with_repair_sync(
+    *,
+    sub_category: str,
+    remarks: str,
+    comments: str,
+    llm_generator: LlmGenerator,
+    max_completion_tokens: int,
+    reasoning_effort: str,
+) -> str:
+    prompt = build_message_classification_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+    )
+    response = ""
+    failure_reason = "empty_or_unmapped_categories"
+    try:
+        response = call_azure_or_custom_sync(
+            llm_generator,
+            prompt,
+            max_completion_tokens,
+            reasoning_effort,
+        )
+        message = build_message_from_response(
+            response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+        if message:
+            return message
+    except Exception as exc:
+        failure_reason = f"initial_classification_failed: {type(exc).__name__}"
+
+    repair_prompt = build_message_repair_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+        previous_response=response,
+        failure_reason=failure_reason,
+    )
+    try:
+        repair_response = call_azure_or_custom_sync(
+            llm_generator,
+            repair_prompt,
+            max_completion_tokens,
+            reasoning_effort,
+        )
+        return build_message_from_response(
+            repair_response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+    except Exception:
+        return ""
+
+
+async def build_message_with_repair_async(
+    *,
+    sub_category: str,
+    remarks: str,
+    comments: str,
+    llm_generator: LlmGenerator,
+    semaphore: asyncio.Semaphore,
+    max_completion_tokens: int,
+    reasoning_effort: str,
+) -> str:
+    prompt = build_message_classification_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+    )
+    response = ""
+    failure_reason = "empty_or_unmapped_categories"
+    try:
+        async with semaphore:
+            response = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
+        message = build_message_from_response(
+            response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+        if message:
+            return message
+    except Exception as exc:
+        failure_reason = f"initial_classification_failed: {type(exc).__name__}"
+
+    repair_prompt = build_message_repair_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+        previous_response=response,
+        failure_reason=failure_reason,
+    )
+    try:
+        async with semaphore:
+            repair_response = await maybe_call_llm(
+                llm_generator,
+                repair_prompt,
+                max_completion_tokens,
+                reasoning_effort,
+            )
+        return build_message_from_response(
+            repair_response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+    except Exception:
+        return ""
+
+
 def enrich_message_column(
     df: pd.DataFrame,
     *,
@@ -391,27 +506,14 @@ def enrich_message_column(
         if not (comments or remarks):
             output.at[index, MESSAGE_COLUMN] = ""
             continue
-        prompt = build_message_classification_prompt(
+        output.at[index, MESSAGE_COLUMN] = build_message_with_repair_sync(
             sub_category=sub_category,
             remarks=remarks,
             comments=comments,
+            llm_generator=llm_generator,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
         )
-        try:
-            response = call_azure_or_custom_sync(
-                llm_generator,
-                prompt,
-                max_completion_tokens,
-                reasoning_effort,
-            )
-            message = build_message_from_response(
-                response,
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        except Exception:
-            message = ""
-        output.at[index, MESSAGE_COLUMN] = message
 
     return output
 
@@ -439,22 +541,15 @@ async def enrich_message_column_async(
     async def classify_row(index: int, sub_category: str, remarks: str, comments: str) -> tuple[int, str]:
         if not (comments or remarks):
             return index, ""
-        prompt = build_message_classification_prompt(
+        message = await build_message_with_repair_async(
             sub_category=sub_category,
             remarks=remarks,
             comments=comments,
+            llm_generator=llm_generator,
+            semaphore=semaphore,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
         )
-        try:
-            async with semaphore:
-                response = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
-            message = build_message_from_response(
-                response,
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        except Exception:
-            message = ""
         return index, message
 
     tasks = [asyncio.create_task(classify_row(*row)) for row in rows]
