@@ -1,110 +1,59 @@
 # Agentic Loss Recovery Copilot
 
-React + FastAPI workflow for converting a QlikSense loss recovery workbook into a Cab Ops recovery package. The app builds a Cab Ops final XLSX with booking-level traceability while agentically reviewing every booking from a strict source hierarchy: `comments`, then `Remarks`, then `Sub Category`.
+React + FastAPI workflow for converting a QlikSense loss recovery workbook into a Cab Ops recovery package. Jobs filter Excel by an **approval date range**, fetch **live** MySQL tracking + supplier vendor names (+ optional Redash comments) for those Booking IDs, enrich per subcategory, and agentically review each booking from `comments` → `Remarks` → `Sub Category`.
 
 ## Project Layout
 
 ```text
 backend/app/
-  agents/        claim cases, evidence tools, specialist agents, judge, and portfolio summary
-  core/          repo paths and env loading
-  domain/        workbook shaping, subcategory splitting, and category processors
-  integrations/  MySQL tracking and Redash comment clients
-  services/      API-facing orchestration, package building, and job state
-  cli/           package entry points for root wrapper scripts
+  agents/         claim cases, evidence, specialists, judge, portfolio
+  core/           paths, env, shared tracking_utils
+  domain/         workbook shaping, subcategory split, category registry/enrichers
+  integrations/   llm_client, tracking/ (repository), MySQL helpers, Redash
+  services/       pipeline, package builder, job store
+  cli/            help entrypoint only
 frontend/src/
   api/ components/ constants/ hooks/ types/
-data/demo/
-  qliksense_dump.xlsx
-  tracking_reports_by_booking.json
-  expected_agentic_loss_recovery_output.xlsx
+data/demo/        reference workbook + reference tracking JSON shape (not used by API for tracking)
 ```
 
-See `AGENTS.md` for the full code map and safe-edit guidance for AI coding agents.
-See `docs/agent-playbook.md` for common change recipes and output-contract notes.
+See `AGENTS.md` and `docs/agent-playbook.md` for agent-oriented guidance.
 
 ## Setup
 
-Copy `.env.example` to `.env` and fill only the services you need. The app can run the bundled demo without MySQL or Redash access.
-
-Optional processing controls:
+Copy `.env.example` to `.env`. **API jobs require MySQL credentials** (`MYSQL_PASSWORD` and related vars). Redash and Azure OpenAI are optional.
 
 ```bash
 CATEGORY_PROCESSING_CONCURRENCY=4
 LLM_CONCURRENCY=3
 ```
 
-These tune how many subcategories and LLM calls run in parallel during API processing.
-`CAB_DELAY_LLM_CONCURRENCY` is still accepted as a deprecated fallback for older `.env` files.
-
-Install Python dependencies with `uv sync` if needed. Install frontend dependencies from `frontend/` with `npm install` if `node_modules` is missing.
+`uv sync` for Python; `cd frontend && npm install` if needed.
 
 ## Run Locally
 
-Backend:
-
 ```bash
 uv run uvicorn backend.app.main:app --reload
+cd frontend && npm run dev
 ```
 
-Frontend:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open `http://localhost:5173`, upload `data/demo/qliksense_dump.xlsx`, keep the default approval date `2026-03-19`, and run the copilot.
+Open `http://localhost:5173`, upload a QlikSense workbook, set **approval start/end** dates, and run.
 
 ## Tests
 
 ```bash
 uv run pytest
-cd frontend
-npm run build
+cd frontend && npm run build
 ```
 
-## CLI Utilities
-
-The root scripts are thin compatibility wrappers around package modules:
-
-```bash
-uv run python build_penalty_dataset.py
-uv run python enrich_cab_delay_reasons.py
-uv run python extract_tracking_reports.py
-uv run python add_redash_comments_to_tracking_json.py
-```
-
-Keep new implementation code under `backend/app/`; only add or change root scripts when a backwards-compatible command needs to be exposed.
-
-Generated API artifacts are written under `backend/.runtime/`. Demo fixtures live under `data/demo/`.
+Tests inject an in-memory tracking repository; they do not call live MySQL.
 
 ## Output
 
-The backend creates an in-memory job, writes temporary artifacts under `backend/.runtime/`, splits prepared rows by cleaned subcategory, and returns a downloadable ZIP package. Each package contains prepared category workbooks, processed category workbooks, `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, and `agent_summary.json`.
+Each job ZIP contains prepared/processed category workbooks, `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, and `agent_summary.json`.
 
-All processed subcategory workbooks include fare, distance, toll, charge, driver-charge, comment fields from tracking reports, and a generated `message` complaint-category column.
-Cab Delay currently adds Incabs timing fields, call comments, generated Incabs insights, and Incabs/comment summaries when Azure OpenAI is configured.
-Extra Money Taken adds trip type and comment fields from tracking reports.
-Fulfillment Not Done adds booking/tracking status, call comments, and formatted Incabs timing fields.
-Lower Category Vehicle adds vehicle category fields from tracking reports plus customer booked/received vehicle values
-extracted from comments.
-Other subcategories add only the shared tracking amount/comment fields until their custom processors are added.
-The agent layer creates normalized claim cases, selects exactly one decision source in this order (`comments` -> `Remarks` -> `Sub Category`), runs a specialist decision, routes it through a Judge Agent, and writes portfolio recommendations. Agent decisions do not inspect timing, fare, driver status, vehicle, tracking, or payment fields; those fields remain workbook enrichment/output data only.
-The frontend shows subcategory progress while processing runs, including Cab Delay insight and summary counters, plus an agent cockpit with confidence, review queue, evidence cards, trace steps, and portfolio actions.
+Agent decisions do not use tracking timing/fare/driver/vehicle/payment fields — those remain workbook enrichment only.
 
-The expected demo path for the bundled workbook produces 71 prepared rows across 9 subcategories.
+## Demo note
 
-## Agentic Demo Script
-
-1. Upload `data/demo/qliksense_dump.xlsx` with approval date `2026-03-19`.
-2. Watch the timeline move from workbook parsing into subcategory processing.
-3. Open the Agentic Loss Recovery Copilot panel:
-   - auto-ready cases show high-confidence recovery candidates
-   - review queue cases show missing, contradicted, or partial source text
-   - each booking drawer shows evidence and agent trace
-4. Download:
-   - `final_output.xlsx` for existing Cab Ops flow
-   - `agent_audit.xlsx` for source-backed decisions
-   - `review_queue.xlsx` for human review
-   - the ZIP package for all artifacts
+`data/demo/tracking_reports_by_booking.json` is **reference-only** (payload shape). Production tracking always comes from live DB for Booking IDs in the selected date range.

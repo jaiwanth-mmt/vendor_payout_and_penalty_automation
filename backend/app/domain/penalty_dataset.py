@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import Iterable
 
@@ -30,32 +29,6 @@ FINAL_OUTPUT_COLUMNS = [
 ]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Read the Qliksense dump, filter by date, consolidate duplicate Booking IDs, "
-            "and save the final dataset."
-        )
-    )
-    parser.add_argument("--input-path", type=Path, default=DEFAULT_INPUT_PATH)
-    parser.add_argument("--output-path", type=Path, default=DEFAULT_OUTPUT_PATH)
-    parser.add_argument(
-        "--input-date",
-        default="2026-03-19",
-        help="Date to filter on in YYYY-MM-DD format. The filter is applied on the date portion only.",
-    )
-    parser.add_argument(
-        "--date-column",
-        default=DEFAULT_DATE_COLUMN,
-        help=f"Column used for date filtering. Defaults to {DEFAULT_DATE_COLUMN!r}.",
-    )
-    parser.add_argument(
-        "--sheet-name",
-        default=0,
-        help="Excel sheet name or index to read. Defaults to the first sheet.",
-    )
-    return parser.parse_args()
-
 
 def read_input_file(path: Path, sheet_name: str | int) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name=sheet_name)
@@ -64,13 +37,28 @@ def read_input_file(path: Path, sheet_name: str | int) -> pd.DataFrame:
 
 
 def filter_by_input_date(df: pd.DataFrame, date_column: str, input_date: str) -> pd.DataFrame:
+    """Filter rows to a single calendar day. Prefer filter_by_input_date_range for jobs."""
+    return filter_by_input_date_range(df, date_column, input_date, input_date)
+
+
+def filter_by_input_date_range(
+    df: pd.DataFrame,
+    date_column: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
     if date_column not in df.columns:
         raise KeyError(f"Column {date_column!r} not found in input file.")
 
-    filter_date = pd.to_datetime(input_date).normalize()
+    start = pd.to_datetime(start_date).normalize()
+    end = pd.to_datetime(end_date).normalize()
+    if start > end:
+        raise ValueError(f"start_date {start_date!r} must be on or before end_date {end_date!r}.")
+
     output = df.copy()
     output[date_column] = pd.to_datetime(output[date_column], errors="coerce")
-    output = output.loc[output[date_column].dt.normalize() == filter_date].copy()
+    day = output[date_column].dt.normalize()
+    output = output.loc[day.ge(start) & day.le(end)].copy()
     return output
 
 
@@ -204,29 +192,3 @@ def save_output(df: pd.DataFrame, output_path: Path) -> None:
     shaped_df.to_excel(output_path, index=False)
 
 
-def main() -> None:
-    args = parse_args()
-
-    raw_df = read_input_file(args.input_path, args.sheet_name)
-    date_filtered_df = filter_by_input_date(raw_df, args.date_column, args.input_date)
-    filtered_df = keep_only_carbd_loss_dept(date_filtered_df)
-    filtered_df = normalize_numeric_columns(
-        filtered_df,
-        ["Loss Amount", "Loss Amount (INR)", "Recoverable", "Recoverable (INR)"],
-    )
-    recoverable_filtered_df = remove_zero_recoverable_rows(filtered_df)
-
-    consolidated_df = consolidate_duplicate_bookings(recoverable_filtered_df)
-
-    save_output(consolidated_df, args.output_path)
-
-    print(f"Rows in raw input: {len(raw_df)}")
-    print(f"Rows after date filter: {len(date_filtered_df)}")
-    print(f"Rows after CARBD Loss Dept filter: {len(filtered_df)}")
-    print(f"Rows after non-zero Recoverable filter: {len(recoverable_filtered_df)}")
-    print(f"Rows after dedupe: {len(consolidated_df)}")
-    print(f"Saved final output to: {args.output_path}")
-
-
-if __name__ == "__main__":
-    main()

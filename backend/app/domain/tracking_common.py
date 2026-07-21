@@ -4,11 +4,8 @@ from typing import Any
 
 import pandas as pd
 
-from backend.app.domain.cab_delay_enrichment import (
-    COMMENTS_COLUMN,
-    booking_comments,
-    first_tracking_row,
-)
+from backend.app.core.tracking_utils import booking_comments, first_tracking_row
+from backend.app.domain.cab_delay_enrichment import COMMENTS_COLUMN
 
 COMPLAINT_AGAINST_COLUMN = "complaint_against"
 COMPLAINT_AGAINST_ID_COLUMN = "complaint_against_id"

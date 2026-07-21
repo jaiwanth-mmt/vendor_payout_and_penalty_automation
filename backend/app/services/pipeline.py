@@ -13,51 +13,28 @@ import pandas as pd
 from backend.app.agents.orchestrator import (
     build_agent_progress,
     build_case_counts,
-    build_portfolio_summary,
     build_portfolio_summary_async,
     investigate_category_frame_async,
 )
-from backend.app.domain.cab_delay_enrichment import call_azure_openai_async, first_tracking_row, read_tracking_data
+from backend.app.integrations.llm_client import call_azure_openai_async
+from backend.app.integrations.tracking import TrackingRepository, matched_booking_ids
 from backend.app.domain.category_processors import (
     CAB_DELAY_CATEGORY,
     CAB_DELAY_OUTPUT_COLUMNS,
-    CATEGORY_PROCESSORS,
-    COMMON_PROCESSED_BASE_COLUMNS,
     COMMON_PROCESSED_OUTPUT_COLUMNS,
-    EXTRA_MONEY_TAKEN_CATEGORY,
-    EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS,
-    FULFILLMENT_NOT_DONE_CATEGORY,
-    FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS,
-    LOWER_CATEGORY_VEHICLE_CATEGORY,
-    LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS,
     CategoryProcessingOutcome,
-    CategoryProcessorSpec,
     InsightSummary,
     LlmGenerator,
-    add_cab_delay_warnings,
-    append_unique_columns,
     cab_delay_progress_payload,
-    call_azure_or_custom_sync,
-    clear_lower_category_vehicle_llm_columns,
-    enrich_cab_delay_insights,
-    enrich_cab_delay_insights_async,
-    enrich_lower_category_vehicle,
-    enrich_lower_category_vehicle_async,
-    enrich_message_column,
     enrich_message_column_async,
-    format_cab_delay_progress,
-    maybe_call_llm,
-    output_columns_for_category,
-    process_category_batch,
     process_category_batch_async,
-    row_text,
 )
 from backend.app.domain.penalty_dataset import (
     DEFAULT_DATE_COLUMN,
     FINAL_OUTPUT_COLUMNS,
     clean_output_text_columns,
     consolidate_duplicate_bookings,
-    filter_by_input_date,
+    filter_by_input_date_range,
     keep_only_carbd_loss_dept,
     normalize_numeric_columns,
     read_input_file,
@@ -66,9 +43,6 @@ from backend.app.domain.penalty_dataset import (
 )
 from backend.app.domain.subcategories import (
     CategoryBatch,
-    build_unique_slug_map,
-    normalize_subcategory_name,
-    slugify,
     split_by_subcategory,
 )
 from backend.app.domain.tracking_common import enrich_common_tracking_fields
@@ -76,7 +50,6 @@ from backend.app.services.package_builder import (
     AGENT_AUDIT_FILENAME,
     AGENT_SUMMARY_FILENAME,
     FINAL_EXPORT_COLUMNS,
-    FINAL_EXPORT_COLUMN_MAP,
     FINAL_OUTPUT_FILENAME,
     MANIFEST_FILENAME,
     PACKAGE_FILENAME,
@@ -148,9 +121,10 @@ def noop_category_progress(_slug: str, _update: dict[str, Any]) -> None:
 def process_uploaded_workbook(
     *,
     input_path: Path,
-    tracking_json_path: Path,
+    tracking_repository: TrackingRepository,
     output_package_path: Path,
-    approval_date: str,
+    start_date: str,
+    end_date: str,
     on_step_start: ProgressCallback,
     on_step_complete: ProgressCallback,
     on_warning: WarningCallback,
@@ -165,9 +139,10 @@ def process_uploaded_workbook(
     return asyncio.run(
         process_uploaded_workbook_async(
             input_path=input_path,
-            tracking_json_path=tracking_json_path,
+            tracking_repository=tracking_repository,
             output_package_path=output_package_path,
-            approval_date=approval_date,
+            start_date=start_date,
+            end_date=end_date,
             on_step_start=on_step_start,
             on_step_complete=on_step_complete,
             on_warning=on_warning,
@@ -185,9 +160,10 @@ def process_uploaded_workbook(
 async def process_uploaded_workbook_async(
     *,
     input_path: Path,
-    tracking_json_path: Path,
+    tracking_repository: TrackingRepository,
     output_package_path: Path,
-    approval_date: str,
+    start_date: str,
+    end_date: str,
     on_step_start: ProgressCallback,
     on_step_complete: ProgressCallback,
     on_warning: WarningCallback,
@@ -228,9 +204,12 @@ async def process_uploaded_workbook_async(
     validate_input_columns(raw_df)
     on_step_complete("workbook_parsed", f"{len(raw_df):,} workbook rows read")
 
-    on_step_start("date_filtered", f"Filtering {DEFAULT_DATE_COLUMN} for {approval_date}")
-    date_filtered_df = filter_by_input_date(raw_df, DEFAULT_DATE_COLUMN, approval_date)
-    on_step_complete("date_filtered", f"{len(date_filtered_df):,} rows match the selected date")
+    on_step_start(
+        "date_filtered",
+        f"Filtering {DEFAULT_DATE_COLUMN} for {start_date} to {end_date}",
+    )
+    date_filtered_df = filter_by_input_date_range(raw_df, DEFAULT_DATE_COLUMN, start_date, end_date)
+    on_step_complete("date_filtered", f"{len(date_filtered_df):,} rows match the selected date range")
 
     on_step_start("filters_applied", "Keeping CARBD rows with non-zero recoverable amount")
     carbd_df = keep_only_carbd_loss_dept(date_filtered_df)
@@ -264,18 +243,15 @@ async def process_uploaded_workbook_async(
         f"{len(category_batches):,} subcategory files prepared",
     )
 
-    on_step_start("tracking_matched", "Matching bookings with bundled tracking data")
-    if not tracking_json_path.exists():
-        raise FileNotFoundError(f"Tracking JSON not found: {tracking_json_path}")
-
-    tracking_bookings = await asyncio.to_thread(read_tracking_data, tracking_json_path)
+    on_step_start("tracking_matched", "Fetching live tracking data for prepared bookings")
     booking_ids = prepared_df["Booking ID"].fillna("").astype(str).str.strip().tolist()
-    matched_booking_ids = [
-        booking_id
-        for booking_id in booking_ids
-        if first_tracking_row(tracking_bookings, booking_id)
-    ]
-    matched_booking_id_set = set(matched_booking_ids)
+    tracking_bookings = await tracking_repository.get_bookings(
+        booking_ids,
+        penalty_df=prepared_df,
+        source_label=str(input_path),
+    )
+    matched_ids = matched_booking_ids(tracking_bookings, booking_ids)
+    matched_booking_id_set = set(matched_ids)
     unmatched_booking_ids = [
         booking_id
         for booking_id in booking_ids
@@ -285,11 +261,11 @@ async def process_uploaded_workbook_async(
         emit_warning(
             {
                 "code": "tracking_not_found",
-                "message": f"{len(unmatched_booking_ids)} bookings were not found in tracking JSON.",
+                "message": f"{len(unmatched_booking_ids)} bookings were not found in live tracking data.",
                 "booking_ids": unmatched_booking_ids,
             }
         )
-    on_step_complete("tracking_matched", f"{len(matched_booking_ids):,} bookings matched tracking data")
+    on_step_complete("tracking_matched", f"{len(matched_ids):,} bookings matched live tracking data")
 
     on_step_start("categories_processed", "Processing each subcategory file independently")
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -389,7 +365,8 @@ async def process_uploaded_workbook_async(
         "agent_summary": agent_summary_path.relative_to(job_dir).as_posix(),
     }
     manifest = build_manifest(
-        approval_date=approval_date,
+        start_date=start_date,
+        end_date=end_date,
         raw_rows=len(raw_df),
         prepared_rows=len(prepared_df),
         categories=finalized_category_outputs,
@@ -420,7 +397,7 @@ async def process_uploaded_workbook_async(
         "prepared_rows": len(prepared_df),
         "category_count": len(finalized_category_outputs),
         "final_output_rows": len(final_output_df),
-        "tracking_matched_bookings": len(matched_booking_ids),
+        "tracking_matched_bookings": len(matched_ids),
         "tracking_unmatched_bookings": len(unmatched_booking_ids),
         "target_insight_rows": cab_delay_summary.target_insight_rows,
         "existing_insight_rows": cab_delay_summary.existing_insight_rows,
@@ -490,10 +467,6 @@ def shape_prepared_output(df: pd.DataFrame) -> pd.DataFrame:
     cleaned_df = clean_output_text_columns(df)
     shaped_df = shape_loss_recovery_output(cleaned_df)
     return shaped_df.loc[:, FINAL_OUTPUT_COLUMNS].copy()
-
-
-def shape_final_output(df: pd.DataFrame) -> pd.DataFrame:
-    return shape_prepared_output(df)
 
 
 def build_initial_category_progress(category_batches: list[CategoryBatch]) -> list[dict[str, Any]]:

@@ -73,8 +73,14 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
     write_sample_workbook(workbook_path)
     write_tracking_json(tracking_path)
 
-    monkeypatch.setattr(main, "TRACKING_JSON_PATH", tracking_path)
     monkeypatch.setattr(main, "RUNTIME_DIR", runtime_dir)
+
+    from backend.app.integrations.tracking import InMemoryTrackingRepository
+
+    monkeypatch.setattr(
+        "backend.app.main.live_tracking_repository_from_env",
+        lambda: InMemoryTrackingRepository(json_path=tracking_path),
+    )
 
     async def mock_azure(prompt: str, _tokens: int, _effort: str) -> str:
         if "Agent specialist decision task." in prompt or "Judge Agent verification task." in prompt:
@@ -116,7 +122,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         with workbook_path.open("rb") as file_handle:
             response = client.post(
                 "/api/jobs",
-                data={"approval_date": "2026-03-19"},
+                data={"start_date": "2026-03-19", "end_date": "2026-03-19"},
                 files={
                     "file": (
                         "qliksense.xlsx",
@@ -254,7 +260,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         download_response = client.get(f"/api/jobs/{job_id}/download")
         assert download_response.status_code == 200
         assert download_response.headers["content-type"] == "application/zip"
-        assert 'filename="agentic_loss_recovery_2026-03-19.zip"' in download_response.headers["content-disposition"]
+        assert 'filename="agentic_loss_recovery_2026-03-19_to_2026-03-19.zip"' in download_response.headers["content-disposition"]
 
         with zipfile.ZipFile(io.BytesIO(download_response.content)) as archive:
             assert set(archive.namelist()) == {
@@ -331,7 +337,8 @@ def test_paged_category_cases_and_review_queue_endpoints(tmp_path: Path) -> None
     main.job_store.create_job(
         job_id=job_id,
         original_filename="input.xlsx",
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         job_dir=job_dir,
         upload_path=upload_path,
     )
@@ -375,7 +382,8 @@ def test_paged_category_cases_and_review_queue_endpoints(tmp_path: Path) -> None
     main.job_store.create_job(
         job_id=not_ready_job_id,
         original_filename="input.xlsx",
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         job_dir=not_ready_dir,
         upload_path=not_ready_upload_path,
     )

@@ -41,6 +41,7 @@ from backend.app.domain.lower_category_vehicle import (
 )
 from backend.app.domain.tracking_common import VENDOR_NAME_COLUMN
 from backend.app.domain.subcategories import CategoryBatch
+from backend.app.integrations.tracking import InMemoryTrackingRepository
 from backend.app.services.pipeline import process_uploaded_workbook
 from backend.tests.factories import (
     assert_complaint_metadata,
@@ -296,9 +297,10 @@ def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> 
     warnings: list[dict[str, object]] = []
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,
@@ -339,9 +341,10 @@ def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_pat
     warnings: list[dict[str, object]] = []
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,
@@ -384,9 +387,10 @@ def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_pa
     warnings: list[dict[str, object]] = []
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,
@@ -430,9 +434,10 @@ def test_lower_category_vehicle_llm_failure_warns_and_leaves_values_blank(tmp_pa
     warnings: list[dict[str, object]] = []
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,

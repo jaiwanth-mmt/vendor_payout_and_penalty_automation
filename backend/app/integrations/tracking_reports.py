@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -15,8 +15,7 @@ import pymysql
 from pymysql.connections import Connection
 from pymysql.cursors import DictCursor
 
-from backend.app.core.env import DEFAULT_ENV_PATH, load_env_file
-from backend.app.core.paths import DEMO_EXPECTED_OUTPUT_PATH, DEMO_TRACKING_JSON_PATH, REPO_ROOT
+from backend.app.core.paths import REPO_ROOT
 from backend.app.integrations.redash_call_comments import (
     DEFAULT_REDASH_BATCH_SIZE,
     DEFAULT_REDASH_HOST,
@@ -26,8 +25,6 @@ from backend.app.integrations.redash_call_comments import (
 )
 
 
-DEFAULT_INPUT_PATH = DEMO_EXPECTED_OUTPUT_PATH
-DEFAULT_OUTPUT_PATH = DEMO_TRACKING_JSON_PATH
 DEFAULT_DB_HOST = "10.212.92.159"
 DEFAULT_DB_PORT = 3307
 DEFAULT_DB_USER = "incabs_blocks_and_confirms_stg"
@@ -155,57 +152,6 @@ def format_source_path(path: Path) -> str:
         return str(path)
 
 
-def parse_args() -> argparse.Namespace:
-    load_env_file()
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Fetch useful tracking_reports_raw fields for Booking IDs present in "
-            "the demo penalty automation output workbook and store tracking rows booking-wise as JSON."
-        )
-    )
-    parser.add_argument("--input-path", type=Path, default=DEFAULT_INPUT_PATH)
-    parser.add_argument("--output-path", type=Path, default=DEFAULT_OUTPUT_PATH)
-    parser.add_argument("--host", default=os.getenv("MYSQL_HOST", DEFAULT_DB_HOST))
-    parser.add_argument("--port", type=int, default=int(os.getenv("MYSQL_PORT", str(DEFAULT_DB_PORT))))
-    parser.add_argument("--user", default=os.getenv("MYSQL_USER", DEFAULT_DB_USER))
-    parser.add_argument("--password", default=os.getenv("MYSQL_PASSWORD"))
-    parser.add_argument("--database", default=os.getenv("MYSQL_DATABASE", DEFAULT_DB_NAME))
-    parser.add_argument("--table-name", default=os.getenv("MYSQL_TABLE_NAME", DEFAULT_TABLE_NAME))
-    parser.add_argument(
-        "--suppliers-table-name",
-        default=os.getenv("MYSQL_SUPPLIERS_TABLE_NAME", DEFAULT_SUPPLIERS_TABLE_NAME),
-        help="Supplier lookup table containing oid and on_final vendor name fields.",
-    )
-    parser.add_argument("--batch-size", type=int, default=100)
-    parser.add_argument("--redash-api-key", default=os.getenv("REDASH_API_KEY"))
-    parser.add_argument("--redash-host", default=os.getenv("REDASH_HOST", DEFAULT_REDASH_HOST))
-    parser.add_argument(
-        "--redash-source-ids",
-        default=os.getenv(
-            "REDASH_SOURCE_IDS",
-            ",".join(str(source_id) for source_id in DEFAULT_REDASH_SOURCE_IDS),
-        ),
-        help="Comma-separated Redash source IDs used to fetch call transcript comments.",
-    )
-    parser.add_argument(
-        "--redash-batch-size",
-        type=int,
-        default=int(os.getenv("REDASH_BATCH_SIZE", str(DEFAULT_REDASH_BATCH_SIZE))),
-    )
-    parser.add_argument(
-        "--skip-redash-comments",
-        action="store_true",
-        help="Build the tracking JSON without fetching Redash call transcript comments.",
-    )
-    parser.add_argument(
-        "--max-columns",
-        type=int,
-        default=0,
-        help="Maximum curated table columns to fetch. Use 0 to keep the full curated set.",
-    )
-    return parser.parse_args()
-
 
 def read_penalty_bookings(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path)
@@ -222,16 +168,29 @@ def read_penalty_bookings(path: Path) -> pd.DataFrame:
     return output
 
 
-def connect_to_mysql(args: argparse.Namespace) -> Connection:
-    if not args.password:
+
+@dataclass(frozen=True)
+class MysqlConfig:
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
+    table_name: str = DEFAULT_TABLE_NAME
+    suppliers_table_name: str = DEFAULT_SUPPLIERS_TABLE_NAME
+    batch_size: int = 100
+
+
+def connect_to_mysql_from_config(config: MysqlConfig) -> Connection:
+    if not config.password:
         raise ValueError("MYSQL_PASSWORD is required. Set it in the environment or pass --password.")
 
     return pymysql.connect(
-        host=args.host,
-        port=args.port,
-        user=args.user,
-        password=args.password,
-        database=args.database,
+        host=config.host,
+        port=config.port,
+        user=config.user,
+        password=config.password,
+        database=config.database,
         charset="utf8mb4",
         cursorclass=DictCursor,
         connect_timeout=15,
@@ -567,99 +526,3 @@ def build_booking_wise_output(
     }
 
 
-def main() -> None:
-    args = parse_args()
-    penalty_df = read_penalty_bookings(args.input_path)
-    booking_ids = penalty_df["Booking ID"].tolist()
-
-    with connect_to_mysql(args) as connection:
-        table_name = resolve_table_name(connection, args.database, args.table_name)
-        available_columns = fetch_table_columns(connection, args.database, table_name)
-        selected_columns = choose_relevant_columns(available_columns, penalty_df, args.max_columns)
-        tracking_rows = fetch_tracking_rows(
-            connection=connection,
-            database=args.database,
-            table_name=table_name,
-            columns=selected_columns,
-            booking_ids=booking_ids,
-            batch_size=args.batch_size,
-        )
-        supplier_ids = collect_supplier_ids(tracking_rows)
-        vendor_names_by_supplier_id, suppliers_table_name = fetch_supplier_vendor_names(
-            connection=connection,
-            database=args.database,
-            suppliers_table_name=args.suppliers_table_name,
-            supplier_ids=supplier_ids,
-            batch_size=args.batch_size,
-        )
-        vendor_name_matched_row_count = add_vendor_names_to_tracking_rows(
-            tracking_rows=tracking_rows,
-            vendor_names_by_supplier_id=vendor_names_by_supplier_id,
-        )
-        if vendor_name_matched_row_count:
-            selected_columns = add_column_once(selected_columns, VENDOR_NAME_COLUMN)
-
-    vendor_name_metadata = {
-        "source_table": suppliers_table_name,
-        "source_tracking_columns": list(SUPPLIER_LOOKUP_COLUMNS),
-        "source_key_column": SUPPLIER_OID_COLUMN,
-        "source_value_column": SUPPLIER_VENDOR_NAME_SOURCE_COLUMN,
-        "output_column": VENDOR_NAME_COLUMN,
-        "supplier_id_count": len(supplier_ids),
-        "matched_supplier_count": len(vendor_names_by_supplier_id),
-        "matched_tracking_row_count": vendor_name_matched_row_count,
-    }
-
-    tracking_rows, selected_columns, dropped_columns = prune_unhelpful_columns(
-        rows=tracking_rows,
-        selected_columns=selected_columns,
-    )
-
-    comments_by_booking: dict[str, str] = {}
-    redash_comments_metadata: dict[str, Any]
-    if args.skip_redash_comments:
-        redash_comments_metadata = {"enabled": False, "reason": "Skipped by --skip-redash-comments."}
-    elif args.redash_api_key:
-        source_ids = parse_source_ids(args.redash_source_ids)
-        comment_result = fetch_call_comments_for_booking_ids(
-            booking_ids=booking_ids,
-            api_key=args.redash_api_key,
-            source_ids=source_ids,
-            redash_host=args.redash_host,
-            batch_size=args.redash_batch_size,
-        )
-        comments_by_booking = comment_result.comments_by_booking
-        redash_comments_metadata = {
-            "enabled": True,
-            "redash_host": args.redash_host,
-            "source_id": comment_result.source_id,
-            "rows_fetched": len(comment_result.rows),
-            "booking_count_with_comments": len(comments_by_booking),
-        }
-    else:
-        redash_comments_metadata = {"enabled": False, "reason": "REDASH_API_KEY was not provided."}
-
-    output = build_booking_wise_output(
-        penalty_df=penalty_df,
-        tracking_rows=tracking_rows,
-        selected_columns=selected_columns,
-        dropped_columns=dropped_columns,
-        table_name=table_name,
-        source_workbook=args.input_path,
-        comments_by_booking=comments_by_booking,
-        redash_comments_metadata=redash_comments_metadata,
-        vendor_name_metadata=vendor_name_metadata,
-    )
-    args.output_path.parent.mkdir(parents=True, exist_ok=True)
-    args.output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    print(f"Booking IDs from workbook: {len(booking_ids)}")
-    print(f"Tracking rows fetched: {len(tracking_rows)}")
-    print(f"Bookings with Redash comments: {len(comments_by_booking)}")
-    print(f"Suppliers with vendor_name matches: {len(vendor_names_by_supplier_id)}")
-    print(f"Selected table columns: {len(selected_columns)}")
-    print(f"Saved JSON output to: {args.output_path}")
-
-
-if __name__ == "__main__":
-    main()

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiUrl, createJob, fetchJob } from "../api/jobs";
-import { DEFAULT_DATE, METRIC_LABELS } from "../constants/pipeline";
+import { DEFAULT_END_DATE, DEFAULT_START_DATE, METRIC_LABELS } from "../constants/pipeline";
 import type { JobResponse, VisibleMetric } from "../types/jobs";
 
 function formatMetricValue(key: string, value: number | string): number | string {
@@ -24,7 +24,8 @@ function isTerminalJob(job: JobResponse): boolean {
 
 export function usePenaltyJob() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [approvalDate, setApprovalDate] = useState(DEFAULT_DATE);
+  const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
+  const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
   const [job, setJob] = useState<JobResponse | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -88,6 +89,10 @@ export function usePenaltyJob() {
       setError("Select a QlikSense Excel workbook first.");
       return;
     }
+    if (startDate > endDate) {
+      setError("Start date must be on or before end date.");
+      return;
+    }
 
     setIsSubmitting(true);
     setError(null);
@@ -95,7 +100,7 @@ export function usePenaltyJob() {
     setJobId(null);
 
     try {
-      const payload = await createJob(selectedFile, approvalDate);
+      const payload = await createJob(selectedFile, startDate, endDate);
       setJobId(payload.job_id);
       const initialJob = await fetchJobStatus(payload.job_id);
       if (isTerminalJob(initialJob)) {
@@ -105,7 +110,7 @@ export function usePenaltyJob() {
       setError(submitError instanceof Error ? submitError.message : "Upload failed");
       setIsSubmitting(false);
     }
-  }, [approvalDate, fetchJobStatus, selectedFile]);
+  }, [endDate, fetchJobStatus, selectedFile, startDate]);
 
   const downloadPackage = useCallback(() => {
     if (!job?.download_ready) return;
@@ -130,8 +135,10 @@ export function usePenaltyJob() {
   return {
     selectedFile,
     setSelectedFile,
-    approvalDate,
-    setApprovalDate,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
     job,
     isProcessing,
     isComplete,

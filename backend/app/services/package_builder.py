@@ -150,7 +150,8 @@ def build_category_output_payload(
 
 def build_manifest(
     *,
-    approval_date: str,
+    start_date: str,
+    end_date: str,
     raw_rows: int,
     prepared_rows: int,
     categories: list[dict[str, Any]],
@@ -159,7 +160,8 @@ def build_manifest(
     agent_artifacts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
-        "approval_date": approval_date,
+        "start_date": start_date,
+        "end_date": end_date,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "raw_rows": raw_rows,
         "prepared_rows": prepared_rows,

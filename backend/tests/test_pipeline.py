@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from backend.app.core.paths import DEMO_TRACKING_JSON_PATH, DEMO_WORKBOOK_PATH
+from backend.app.integrations.tracking import InMemoryTrackingRepository
 from backend.app.domain.cab_delay_enrichment import (
     BOARDED_COLUMN,
     COMMENTS_COLUMN,
@@ -47,9 +48,10 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
 
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda step_id, _message: started_steps.append(step_id),
         on_step_complete=lambda step_id, _message: completed_steps.append(step_id),
         on_warning=warnings.append,
@@ -166,9 +168,10 @@ def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> 
 
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=lambda _warning: None,
@@ -206,9 +209,10 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
 
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,
@@ -243,9 +247,10 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
 
     result = process_uploaded_workbook(
         input_path=DEMO_WORKBOOK_PATH,
-        tracking_json_path=DEMO_TRACKING_JSON_PATH,
+        tracking_repository=InMemoryTrackingRepository(json_path=DEMO_TRACKING_JSON_PATH),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=lambda _warning: None,
@@ -298,9 +303,10 @@ def test_process_uploaded_workbook_keeps_package_when_comment_summary_fails(tmp_
 
     result = process_uploaded_workbook(
         input_path=workbook_path,
-        tracking_json_path=tracking_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
         output_package_path=package_path,
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         on_step_start=lambda _step_id, _message: None,
         on_step_complete=lambda _step_id, _message: None,
         on_warning=warnings.append,
@@ -331,9 +337,10 @@ def test_process_uploaded_workbook_reports_missing_columns(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="missing required columns"):
         process_uploaded_workbook(
             input_path=workbook_path,
-            tracking_json_path=tracking_path,
+            tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
             output_package_path=tmp_path / "agentic_loss_recovery_package.zip",
-            approval_date="2026-03-19",
+            start_date="2026-03-19",
+        end_date="2026-03-19",
             on_step_start=lambda _step_id, _message: None,
             on_step_complete=lambda _step_id, _message: None,
             on_warning=lambda _warning: None,

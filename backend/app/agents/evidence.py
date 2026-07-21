@@ -20,9 +20,9 @@ SOURCE_LABELS = {
 
 
 class EvidenceToolset:
-    def __init__(self, _tracking_bookings: dict[str, Any]) -> None:
-        # Tracking rows enrich workbooks, but the agent decision contract only
-        # exposes comments, Remarks, Sub Category, and computed source alignment.
+    """Agent decisions use comments, Remarks, and Sub Category only; tracking rows are not exposed."""
+
+    def __init__(self) -> None:
         pass
 
     def gather_for_case(self, case: ClaimCase) -> tuple[list[EvidenceItem], list[AgentTraceStep]]:
