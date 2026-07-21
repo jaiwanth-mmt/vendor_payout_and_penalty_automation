@@ -4,6 +4,20 @@ import { apiUrl, createJob, fetchJob } from "../api/jobs";
 import { DEFAULT_DATE, METRIC_LABELS } from "../constants/pipeline";
 import type { JobResponse, VisibleMetric } from "../types/jobs";
 
+function formatMetricValue(key: string, value: number | string): number | string {
+  const numberValue = Number(value);
+  if (key === "agent_total_recoverable_amount") {
+    const amount = Number.isFinite(numberValue)
+      ? numberValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })
+      : "0";
+    return `₹${amount}`;
+  }
+  if (key === "agent_high_confidence_percentage") {
+    return `${Number.isFinite(numberValue) ? numberValue.toFixed(1) : "0.0"}%`;
+  }
+  return typeof value === "number" ? value.toLocaleString("en-IN") : value;
+}
+
 function isTerminalJob(job: JobResponse): boolean {
   return job.status === "succeeded" || job.status === "failed";
 }
@@ -55,9 +69,18 @@ export function usePenaltyJob() {
 
   const visibleMetrics = useMemo<VisibleMetric[]>(() => {
     if (!job?.metrics) return [];
+    const totalCases = Number(job.metrics.agent_total_cases ?? job.case_counts.total_cases ?? 0);
+    const highConfidenceCases = Number(
+      job.metrics.agent_high_confidence_cases ?? job.agent_summary?.high_confidence_case_count ?? 0,
+    );
+    const highConfidencePercentage = totalCases > 0 ? (highConfidenceCases / totalCases) * 100 : 0;
+    const metricValues: Record<string, number | string> = {
+      ...job.metrics,
+      agent_high_confidence_percentage: highConfidencePercentage
+    };
     return Object.entries(METRIC_LABELS)
-      .filter(([key]) => job.metrics[key] !== undefined)
-      .map(([key, label]) => ({ key, label, value: job.metrics[key] }));
+      .filter(([key]) => metricValues[key] !== undefined)
+      .map(([key, label]) => ({ key, label, value: formatMetricValue(key, metricValues[key]) }));
   }, [job]);
 
   const submitJob = useCallback(async () => {
@@ -94,6 +117,16 @@ export function usePenaltyJob() {
     window.location.href = apiUrl(`/api/jobs/${job.job_id}/final-output/download`);
   }, [job]);
 
+  const downloadAgentAudit = useCallback(() => {
+    if (job?.status !== "succeeded") return;
+    window.location.href = apiUrl(`/api/jobs/${job.job_id}/agent-audit/download`);
+  }, [job]);
+
+  const downloadReviewQueue = useCallback(() => {
+    if (job?.status !== "succeeded") return;
+    window.location.href = apiUrl(`/api/jobs/${job.job_id}/review-queue/download`);
+  }, [job]);
+
   return {
     selectedFile,
     setSelectedFile,
@@ -108,6 +141,8 @@ export function usePenaltyJob() {
     visibleMetrics,
     submitJob,
     downloadPackage,
-    downloadFinalOutput
+    downloadFinalOutput,
+    downloadAgentAudit,
+    downloadReviewQueue
   };
 }

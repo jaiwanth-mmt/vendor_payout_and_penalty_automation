@@ -33,7 +33,19 @@ DEFAULT_DB_PORT = 3307
 DEFAULT_DB_USER = "incabs_blocks_and_confirms_stg"
 DEFAULT_DB_NAME = "incabs_blocks_and_confirms"
 DEFAULT_TABLE_NAME = "tracking_reports_raw"
+DEFAULT_SUPPLIERS_TABLE_NAME = "incabs_suppliers"
 ORDER_REFERENCE_COLUMN = "order_reference_number"
+SUPPLIER_ID_COLUMN = "supplier_id"
+ORIGINAL_SUPPLIER_ID_COLUMN = "original_supplier_id"
+DETACHED_SUPPLIER_ID_COLUMN = "detached_supplier_id"
+SUPPLIER_LOOKUP_COLUMNS = (
+    SUPPLIER_ID_COLUMN,
+    ORIGINAL_SUPPLIER_ID_COLUMN,
+    DETACHED_SUPPLIER_ID_COLUMN,
+)
+SUPPLIER_OID_COLUMN = "oid"
+SUPPLIER_VENDOR_NAME_SOURCE_COLUMN = "on_final"
+VENDOR_NAME_COLUMN = "vendor_name"
 
 CURATED_TRACKING_COLUMNS = [
     "dispatch_id",
@@ -160,6 +172,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--password", default=os.getenv("MYSQL_PASSWORD"))
     parser.add_argument("--database", default=os.getenv("MYSQL_DATABASE", DEFAULT_DB_NAME))
     parser.add_argument("--table-name", default=os.getenv("MYSQL_TABLE_NAME", DEFAULT_TABLE_NAME))
+    parser.add_argument(
+        "--suppliers-table-name",
+        default=os.getenv("MYSQL_SUPPLIERS_TABLE_NAME", DEFAULT_SUPPLIERS_TABLE_NAME),
+        help="Supplier lookup table containing oid and on_final vendor name fields.",
+    )
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--redash-api-key", default=os.getenv("REDASH_API_KEY"))
     parser.add_argument("--redash-host", default=os.getenv("REDASH_HOST", DEFAULT_REDASH_HOST))
@@ -316,6 +333,107 @@ def fetch_tracking_rows(
     return all_rows
 
 
+def normalize_lookup_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return value.hex()
+    return str(value).strip()
+
+
+def collect_supplier_ids(tracking_rows: list[dict[str, Any]]) -> list[str]:
+    supplier_ids = {
+        normalize_lookup_value(row.get(column))
+        for row in tracking_rows
+        for column in SUPPLIER_LOOKUP_COLUMNS
+    }
+    return sorted(supplier_id for supplier_id in supplier_ids if supplier_id)
+
+
+def fetch_supplier_vendor_names(
+    connection: Connection,
+    database: str,
+    suppliers_table_name: str,
+    supplier_ids: list[str],
+    batch_size: int,
+) -> tuple[dict[str, str], str]:
+    resolved_suppliers_table_name = resolve_table_name(connection, database, suppliers_table_name)
+    if not supplier_ids:
+        return {}, resolved_suppliers_table_name
+
+    available_columns = fetch_table_columns(connection, database, resolved_suppliers_table_name)
+    available_columns_by_name = {
+        column_name.casefold(): column_name
+        for column_name in available_columns
+    }
+    required_columns = [SUPPLIER_OID_COLUMN, SUPPLIER_VENDOR_NAME_SOURCE_COLUMN]
+    missing_columns = [
+        column_name
+        for column_name in required_columns
+        if column_name.casefold() not in available_columns_by_name
+    ]
+    if missing_columns:
+        raise KeyError(
+            f"Supplier table {resolved_suppliers_table_name!r} is missing required columns: {missing_columns}"
+        )
+
+    oid_column = available_columns_by_name[SUPPLIER_OID_COLUMN.casefold()]
+    vendor_name_column = available_columns_by_name[SUPPLIER_VENDOR_NAME_SOURCE_COLUMN.casefold()]
+    qualified_table_name = (
+        f"{quote_identifier(database)}.{quote_identifier(resolved_suppliers_table_name)}"
+    )
+    vendor_names_by_supplier_id: dict[str, str] = {}
+
+    with connection.cursor() as cursor:
+        for supplier_id_batch in chunked(supplier_ids, batch_size):
+            placeholders = ", ".join(["%s"] * len(supplier_id_batch))
+            sql = (
+                f"SELECT {quote_identifier(oid_column)} AS supplier_oid, "
+                f"{quote_identifier(vendor_name_column)} AS supplier_vendor_name "
+                f"FROM {qualified_table_name} "
+                f"WHERE {quote_identifier(oid_column)} IN ({placeholders})"
+            )
+            cursor.execute(sql, supplier_id_batch)
+            for row in cursor.fetchall():
+                supplier_id = normalize_lookup_value(row.get("supplier_oid"))
+                vendor_name = normalize_lookup_value(row.get("supplier_vendor_name"))
+                if supplier_id and vendor_name:
+                    vendor_names_by_supplier_id[supplier_id] = vendor_name
+
+    return vendor_names_by_supplier_id, resolved_suppliers_table_name
+
+
+def supplier_lookup_id_for_tracking_row(row: dict[str, Any]) -> str:
+    for column in SUPPLIER_LOOKUP_COLUMNS:
+        supplier_id = normalize_lookup_value(row.get(column))
+        if supplier_id:
+            return supplier_id
+    return ""
+
+
+def add_vendor_names_to_tracking_rows(
+    tracking_rows: list[dict[str, Any]],
+    vendor_names_by_supplier_id: dict[str, str],
+) -> int:
+    matched_row_count = 0
+    for row in tracking_rows:
+        supplier_id = supplier_lookup_id_for_tracking_row(row)
+        vendor_name = vendor_names_by_supplier_id.get(supplier_id)
+        if vendor_name:
+            row[VENDOR_NAME_COLUMN] = vendor_name
+            matched_row_count += 1
+    return matched_row_count
+
+
+def add_column_once(columns: list[str], column: str) -> list[str]:
+    if column.casefold() in {existing_column.casefold() for existing_column in columns}:
+        return columns
+    return [*columns, column]
+
+
 def is_empty_value(value: Any) -> bool:
     if value is None:
         return True
@@ -402,6 +520,7 @@ def build_booking_wise_output(
     source_workbook: Path,
     comments_by_booking: dict[str, str] | None = None,
     redash_comments_metadata: dict[str, Any] | None = None,
+    vendor_name_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     comments_by_booking = comments_by_booking or {}
     rows_by_booking_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -439,6 +558,8 @@ def build_booking_wise_output(
     }
     if redash_comments_metadata is not None:
         metadata["redash_comments"] = redash_comments_metadata
+    if vendor_name_metadata is not None:
+        metadata["vendor_name"] = vendor_name_metadata
 
     return {
         "metadata": metadata,
@@ -463,6 +584,31 @@ def main() -> None:
             booking_ids=booking_ids,
             batch_size=args.batch_size,
         )
+        supplier_ids = collect_supplier_ids(tracking_rows)
+        vendor_names_by_supplier_id, suppliers_table_name = fetch_supplier_vendor_names(
+            connection=connection,
+            database=args.database,
+            suppliers_table_name=args.suppliers_table_name,
+            supplier_ids=supplier_ids,
+            batch_size=args.batch_size,
+        )
+        vendor_name_matched_row_count = add_vendor_names_to_tracking_rows(
+            tracking_rows=tracking_rows,
+            vendor_names_by_supplier_id=vendor_names_by_supplier_id,
+        )
+        if vendor_name_matched_row_count:
+            selected_columns = add_column_once(selected_columns, VENDOR_NAME_COLUMN)
+
+    vendor_name_metadata = {
+        "source_table": suppliers_table_name,
+        "source_tracking_columns": list(SUPPLIER_LOOKUP_COLUMNS),
+        "source_key_column": SUPPLIER_OID_COLUMN,
+        "source_value_column": SUPPLIER_VENDOR_NAME_SOURCE_COLUMN,
+        "output_column": VENDOR_NAME_COLUMN,
+        "supplier_id_count": len(supplier_ids),
+        "matched_supplier_count": len(vendor_names_by_supplier_id),
+        "matched_tracking_row_count": vendor_name_matched_row_count,
+    }
 
     tracking_rows, selected_columns, dropped_columns = prune_unhelpful_columns(
         rows=tracking_rows,
@@ -502,6 +648,7 @@ def main() -> None:
         source_workbook=args.input_path,
         comments_by_booking=comments_by_booking,
         redash_comments_metadata=redash_comments_metadata,
+        vendor_name_metadata=vendor_name_metadata,
     )
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     args.output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -509,6 +656,7 @@ def main() -> None:
     print(f"Booking IDs from workbook: {len(booking_ids)}")
     print(f"Tracking rows fetched: {len(tracking_rows)}")
     print(f"Bookings with Redash comments: {len(comments_by_booking)}")
+    print(f"Suppliers with vendor_name matches: {len(vendor_names_by_supplier_id)}")
     print(f"Selected table columns: {len(selected_columns)}")
     print(f"Saved JSON output to: {args.output_path}")
 

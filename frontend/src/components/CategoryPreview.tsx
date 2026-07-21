@@ -1,16 +1,28 @@
-import { ChevronDown, ChevronUp, Columns3, FileSpreadsheet, ListCollapse, Table2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Columns3, FileSpreadsheet, ListCollapse, LoaderCircle, Table2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { CategoryOutput, JobResponse } from "../types/jobs";
+import { fetchCategoryPreview } from "../api/jobs";
+import type { CategoryOutput, CategoryPreviewResponse, JobResponse } from "../types/jobs";
+import BookingSearchForm from "./BookingSearchForm";
+import PaginationControls from "./PaginationControls";
 
 type CategoryPreviewProps = {
   job: JobResponse | null;
   isComplete: boolean;
 };
 
-const KEY_PREVIEW_COLUMNS = ["Booking ID", "Sub Category", "Recoverable", "Remarks", "Comments", "message"];
+const KEY_PREVIEW_COLUMNS = [
+  "Booking ID",
+  "Sub Category",
+  "vendor_name",
+  "Recoverable",
+  "Remarks",
+  "Comments",
+  "message",
+];
 const NARRATIVE_COLUMN_MARKERS = ["comment", "insight", "message", "remark", "summary"];
 const EXPANDABLE_TEXT_LENGTH = 150;
+const CATEGORY_PAGE_SIZE = 5;
 
 function isNarrativeColumn(column: string): boolean {
   const normalizedColumn = column.toLowerCase();
@@ -45,33 +57,48 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [expandedCell, setExpandedCell] = useState<string | null>(null);
   const [showAllColumns, setShowAllColumns] = useState(false);
+  const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState("");
+  const [preview, setPreview] = useState<CategoryPreviewResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const activeCategory = useMemo<CategoryOutput | null>(() => {
     if (!categories.length) return null;
     return categories.find((category) => category.slug === activeSlug) ?? categories[0];
   }, [activeSlug, categories]);
 
-  const keyPreviewColumns = useMemo(
-    () => (activeCategory ? resolveKeyPreviewColumns(activeCategory.output_columns) : []),
-    [activeCategory]
-  );
+  const activeCategorySlug = activeCategory?.slug ?? "";
+  const activePage = activeCategorySlug ? categoryPages[activeCategorySlug] ?? 1 : 1;
+  const previewColumns = preview?.columns ?? activeCategory?.output_columns ?? [];
+  const previewRows = preview?.rows ?? [];
+  const rowCount = preview?.row_count ?? activeCategory?.row_count ?? 0;
+  const totalPages = preview?.total_pages ?? Math.max(1, Math.ceil(rowCount / CATEGORY_PAGE_SIZE));
+
+  const keyPreviewColumns = useMemo(() => resolveKeyPreviewColumns(previewColumns), [previewColumns]);
 
   const isFullColumnMode = showAllColumns || !keyPreviewColumns.length;
 
   const visibleColumns = useMemo(() => {
     if (!activeCategory) return [];
-    if (isFullColumnMode) return activeCategory.output_columns;
+    if (isFullColumnMode) return previewColumns;
     return keyPreviewColumns;
-  }, [activeCategory, isFullColumnMode, keyPreviewColumns]);
+  }, [activeCategory, isFullColumnMode, keyPreviewColumns, previewColumns]);
 
   const hasHiddenColumns = Boolean(
-    activeCategory && keyPreviewColumns.length > 0 && activeCategory.output_columns.length > keyPreviewColumns.length
+    activeCategory && keyPreviewColumns.length > 0 && previewColumns.length > keyPreviewColumns.length
   );
 
   useEffect(() => {
     setActiveSlug(null);
     setExpandedCell(null);
     setShowAllColumns(false);
+    setCategoryPages({});
+    setSearchInput("");
+    setActiveSearch("");
+    setPreview(null);
+    setError(null);
   }, [job?.job_id]);
 
   useEffect(() => {
@@ -79,6 +106,10 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
       setActiveSlug(null);
       setExpandedCell(null);
       setShowAllColumns(false);
+      setSearchInput("");
+      setActiveSearch("");
+      setPreview(null);
+      setError(null);
       return;
     }
 
@@ -86,18 +117,85 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
       setActiveSlug(null);
       setExpandedCell(null);
       setShowAllColumns(false);
+      setSearchInput("");
+      setActiveSearch("");
+      setPreview(null);
+      setError(null);
     }
   }, [activeSlug, categories]);
+
+  useEffect(() => {
+    if (!job?.job_id || !isComplete || !activeCategorySlug) {
+      setPreview(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoading(true);
+    setPreview(null);
+    setError(null);
+
+    fetchCategoryPreview(job.job_id, activeCategorySlug, activePage, activeSearch)
+      .then((payload) => {
+        if (!isCancelled) {
+          setPreview(payload);
+          if (payload.page !== activePage) {
+            setCategoryPages((currentValue) => ({ ...currentValue, [activeCategorySlug]: payload.page }));
+          }
+        }
+      })
+      .catch((previewError) => {
+        if (!isCancelled) {
+          setPreview(null);
+          setError(previewError instanceof Error ? previewError.message : "Unable to load category preview");
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeCategorySlug, activePage, activeSearch, isComplete, job?.job_id]);
 
   function handleCategorySelect(slug: string) {
     setActiveSlug(slug);
     setExpandedCell(null);
     setShowAllColumns(false);
+    setSearchInput("");
+    setActiveSearch("");
   }
 
   function handleColumnModeToggle() {
     setExpandedCell(null);
     setShowAllColumns((currentValue) => !currentValue);
+  }
+
+  function handlePageChange(nextPage: number) {
+    if (!activeCategorySlug) return;
+    setExpandedCell(null);
+    setCategoryPages((currentValue) => ({ ...currentValue, [activeCategorySlug]: nextPage }));
+  }
+
+  function handleSearch() {
+    if (!activeCategorySlug) return;
+    const trimmedSearch = searchInput.trim();
+    setSearchInput(trimmedSearch);
+    setActiveSearch(trimmedSearch);
+    setExpandedCell(null);
+    setCategoryPages((currentValue) => ({ ...currentValue, [activeCategorySlug]: 1 }));
+  }
+
+  function handleClearSearch() {
+    if (!activeCategorySlug) return;
+    setSearchInput("");
+    setActiveSearch("");
+    setExpandedCell(null);
+    setCategoryPages((currentValue) => ({ ...currentValue, [activeCategorySlug]: 1 }));
   }
 
   return (
@@ -112,7 +210,19 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
         </div>
         {activeCategory && (
           <div className="previewActions">
-            <span className="previewCount">{activeCategory.row_count} rows</span>
+            <BookingSearchForm
+              inputId="category-booking-search"
+              value={searchInput}
+              placeholder="Search booking ID"
+              disabled={!isComplete}
+              isActive={Boolean(activeSearch)}
+              onValueChange={setSearchInput}
+              onSearch={handleSearch}
+              onClear={handleClearSearch}
+            />
+            <span className="previewCount">
+              {activeSearch ? `${rowCount.toLocaleString()} matches` : `${activeCategory.row_count} rows`}
+            </span>
             <button
               aria-expanded={showAllColumns}
               className="previewColumnToggle"
@@ -148,7 +258,17 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
       )}
 
       <div className="tableFrame">
-        {activeCategory?.preview_rows.length ? (
+        {isLoading ? (
+          <div className="tableEmpty">
+            <LoaderCircle className="spin" size={30} />
+            <span>Loading category preview</span>
+          </div>
+        ) : error ? (
+          <div className="tableEmpty">
+            <FileSpreadsheet size={30} />
+            <span>{error}</span>
+          </div>
+        ) : previewRows.length ? (
           <table className="previewTable" data-mode={isFullColumnMode ? "all" : "key"}>
             <colgroup>
               {visibleColumns.map((column) => (
@@ -168,15 +288,15 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
               </tr>
             </thead>
             <tbody>
-              {activeCategory.preview_rows.map((row, rowIndex) => {
-                const rowKey = `${row["Booking ID"] ?? activeCategory.slug}-${rowIndex}`;
+              {previewRows.map((row, rowIndex) => {
+                const rowKey = `${row["Booking ID"] ?? activeCategorySlug}-${preview?.page ?? activePage}-${rowIndex}`;
 
                 return (
                   <tr key={rowKey}>
                     {visibleColumns.map((column) => {
                       const text = renderPreviewValue(row[column]);
                       const isNarrative = isNarrativeColumn(column);
-                      const cellKey = `${activeCategory.slug}-${rowIndex}-${column}`;
+                      const cellKey = `${activeCategorySlug}-${preview?.page ?? activePage}-${rowIndex}-${column}`;
                       const isExpanded = expandedCell === cellKey;
                       const canExpand = isNarrative && text.length > EXPANDABLE_TEXT_LENGTH;
 
@@ -216,10 +336,23 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
         ) : (
           <div className="tableEmpty">
             <FileSpreadsheet size={30} />
-            <span>Processed category rows will render here</span>
+            <span>{activeSearch ? `No category rows match ${activeSearch}` : "Processed category rows will render here"}</span>
           </div>
         )}
       </div>
+
+      {activeCategory && (
+        <PaginationControls
+          label="Category preview pagination"
+          page={preview?.page ?? activePage}
+          totalPages={totalPages}
+          itemCount={rowCount}
+          pageSize={CATEGORY_PAGE_SIZE}
+          noun="rows"
+          disabled={!isComplete || isLoading}
+          onPageChange={handlePageChange}
+        />
+      )}
     </section>
   );
 }

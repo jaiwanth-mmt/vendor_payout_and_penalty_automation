@@ -1,4 +1,4 @@
-import { CheckCircle2, Download, LoaderCircle, Table2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ListChecks, LoaderCircle, Table2, XCircle } from "lucide-react";
 
 import type { CabDelayProgress, CategoryProgress, JobResponse, StepState, StepStatus, VisibleMetric } from "../types/jobs";
 import MetricsGrid from "./MetricsGrid";
@@ -15,9 +15,12 @@ function ProcessingTimeline({ job, visibleMetrics, hasFailed, onDownload }: Proc
   return (
     <section className="processSurface">
       <div className="surfaceHeader processHeader">
-        <div>
-          <h2>Processing timeline</h2>
-          <p>{job ? job.original_filename : "Awaiting workbook"}</p>
+        <div className="previewTitle">
+          <ListChecks size={21} />
+          <div>
+            <h2>Processing timeline</h2>
+            <p>{job ? job.original_filename : "Awaiting workbook"}</p>
+          </div>
         </div>
         <button className="ghostButton" type="button" disabled={!job?.download_ready} onClick={onDownload}>
           <Download size={18} />
@@ -124,6 +127,7 @@ function CabDelayCounters({ counters }: { counters: CabDelayProgress }) {
 function StepIcon({ status }: { status: StepStatus }) {
   if (status === "completed") return <CheckCircle2 size={18} />;
   if (status === "running") return <LoaderCircle className="spin" size={18} />;
+  if (status === "warning") return <AlertTriangle size={18} />;
   if (status === "failed") return <XCircle size={18} />;
   return <span className="pendingDot" aria-hidden="true" />;
 }

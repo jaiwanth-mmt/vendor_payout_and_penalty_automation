@@ -1,5 +1,6 @@
 import { Activity } from "lucide-react";
 
+import AgentCockpit from "./components/AgentCockpit";
 import CategoryPreview from "./components/CategoryPreview";
 import FinalOutputPreview from "./components/FinalOutputPreview";
 import ProcessingTimeline from "./components/ProcessingTimeline";
@@ -21,7 +22,9 @@ function App() {
     visibleMetrics,
     submitJob,
     downloadPackage,
-    downloadFinalOutput
+    downloadFinalOutput,
+    downloadAgentAudit,
+    downloadReviewQueue
   } = usePenaltyJob();
 
   function handleFileSelect(file: File | null) {
@@ -39,7 +42,7 @@ function App() {
           </div>
           <div>
             <p className="eyebrow">MakeMyTrip cab ops</p>
-            <h1>Penalty Automation</h1>
+            <h1>Agentic Loss Recovery Copilot</h1>
           </div>
         </div>
         <div className="statusPill" data-state={job?.status ?? "idle"}>
@@ -66,6 +69,12 @@ function App() {
         />
       </section>
 
+      <AgentCockpit
+        job={job}
+        isComplete={isComplete}
+        onDownloadAgentAudit={downloadAgentAudit}
+        onDownloadReviewQueue={downloadReviewQueue}
+      />
       <FinalOutputPreview job={job} isComplete={isComplete} onDownload={downloadFinalOutput} />
       <CategoryPreview job={job} isComplete={isComplete} />
     </main>

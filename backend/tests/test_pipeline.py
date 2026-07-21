@@ -21,6 +21,7 @@ from backend.app.domain.complaint_message import MESSAGE_COLUMN
 from backend.app.domain.tracking_common import (
     COMPLAINT_AGAINST_VALUE,
     TITLE_VALUE,
+    VENDOR_NAME_COLUMN,
 )
 from backend.app.services import pipeline
 from backend.app.services.pipeline import CAB_DELAY_OUTPUT_COLUMNS, process_uploaded_workbook
@@ -36,7 +37,7 @@ from backend.tests.factories import (
 def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_sample_workbook(workbook_path)
     write_tracking_json(tracking_path)
 
@@ -66,16 +67,43 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert result.package_path == package_path
     assert result.manifest_path == tmp_path / "manifest.json"
     assert result.final_output_path == tmp_path / "final_output.xlsx"
+    assert result.agent_audit_path == tmp_path / "agent_audit.xlsx"
+    assert result.review_queue_path == tmp_path / "review_queue.xlsx"
+    assert result.agent_summary_path == tmp_path / "agent_summary.json"
     assert package_path.exists()
+    assert result.case_counts["total_cases"] == 1
+    assert result.agent_summary["case_counts"]["total_cases"] == 1
+    assert result.agent_summary["high_confidence_case_count"] == 1
+    assert result.metrics["agent_high_confidence_cases"] == 1
+    assert result.agent_summary["top_vendors_by_penalty"] == [
+        {
+            "vendor_name": "savaari",
+            "case_count": 1,
+            "total_recoverable": 150,
+            "top_subcategories": [
+                {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+            ],
+        }
+    ]
+    assert result.agent_summary["top_subcategories_by_penalty"] == [
+        {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+    ]
+    assert result.agent_summary["top_subcategories_by_count"] == [
+        {"subcategory": "Cab Delay", "case_count": 1, "total_recoverable": 150},
+    ]
+    assert result.agent_cases[0]["booking_id"] == "B1"
+    assert result.agent_cases[0]["vendor_name"] == "savaari"
+    assert result.agent_cases[0]["final_decision"]["agent"] == "Judge Agent"
     assert result.final_output == {
         "filename": "final_output.xlsx",
         "row_count": 1,
         "columns": pipeline.FINAL_EXPORT_COLUMNS,
         "download_ready": True,
     }
-    assert not (tmp_path / "penalty_automation_output.csv").exists()
+    assert not (tmp_path / "agentic_loss_recovery_output.csv").exists()
     final_output_df = pd.read_excel(result.final_output_path, keep_default_na=False)
     assert final_output_df.columns.tolist() == pipeline.FINAL_EXPORT_COLUMNS
+    assert final_output_df.loc[0, "booking_id"] == "B1"
     assert final_output_df.loc[0, "complaint_reasons"] == "Cab Delay"
     assert final_output_df.loc[0, "complaint_against"] == COMPLAINT_AGAINST_VALUE
     assert final_output_df.loc[0, "complaint_against_id"] == "dispatch-b1"
@@ -94,6 +122,7 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert output_df.loc[0, "cash_collected"] == 1000
     assert output_df.loc[0, "extra_travelled_fare"] == 40
     assert output_df.loc[0, "total_driver_charge"] == 150
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "savaari"
     assert "preferred start time of customer (UTC)" not in output_df.columns
     assert output_df.loc[0, PREFERRED_START_TIME_IST_COLUMN] == "19 Mar 2026 10:00 AM"
     assert output_df.loc[0, DRIVER_STARTED_COLUMN] == "19 Mar 2026 10:20 AM"
@@ -106,10 +135,8 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert output_df.loc[0, INCABS_COMMENT_SUMMARY_COLUMN] == "Mock combined summary."
     assert output_df.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 15 Minutes"
     assert result.category_outputs[0]["name"] == "Cab Delay"
-    assert result.category_outputs[0]["preview_rows"][0]["Booking ID"] == "B1"
-    assert_complaint_metadata(result.category_outputs[0]["preview_rows"][0], "dispatch-b1")
-    assert result.category_outputs[0]["preview_rows"][0][INCABS_INSIGHT_COLUMN] == "Mock Incabs insight."
-    assert result.category_outputs[0]["preview_rows"][0][MESSAGE_COLUMN] == "Cab Delayed > 15 Minutes"
+    assert result.category_outputs[0]["row_count"] == 1
+    assert "preview_rows" not in result.category_outputs[0]
     assert "package_prepared" in completed_steps
     assert warnings == []
     assert started_steps[0] == "workbook_parsed"
@@ -118,6 +145,9 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
         assert set(archive.namelist()) == {
             "manifest.json",
             "final_output.xlsx",
+            "agent_audit.xlsx",
+            "review_queue.xlsx",
+            "agent_summary.json",
             "category_files/prepared/cab-delay.xlsx",
             "category_files/processed/cab-delay.xlsx",
         }
@@ -126,7 +156,7 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
 def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
     write_tracking_json(tracking_path)
 
@@ -160,7 +190,7 @@ def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> 
 def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: Path, monkeypatch) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
     write_tracking_json(tracking_path)
     original_processor = pipeline.process_category_batch_async
@@ -201,6 +231,7 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
     assert manifest["final_output"]["row_count"] == 2
     final_output_df = pd.read_excel(result.final_output_path, keep_default_na=False)
     assert final_output_df.columns.tolist() == pipeline.FINAL_EXPORT_COLUMNS
+    assert final_output_df["booking_id"].tolist() == ["B1", "B5"]
     assert final_output_df["complaint_reasons"].tolist() == ["Cab Delay", "Extra Money Taken"]
     manifest_category = next(category for category in manifest["categories"] if category["slug"] == "extra-money-taken")
     assert manifest_category["status"] == "failed"
@@ -208,7 +239,7 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
 
 
 def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path) -> None:
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
 
     result = process_uploaded_workbook(
         input_path=DEMO_WORKBOOK_PATH,
@@ -237,6 +268,7 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
     assert result.metrics["category_count"] == 9
     assert result.metrics["final_output_rows"] == 71
     assert result.final_output["row_count"] == 71
+    assert all(VENDOR_NAME_COLUMN in category["output_columns"] for category in result.category_outputs)
     assert package_path.exists()
     final_output_df = pd.read_excel(result.final_output_path, keep_default_na=False)
     assert final_output_df.columns.tolist() == pipeline.FINAL_EXPORT_COLUMNS
@@ -253,7 +285,7 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
 def test_process_uploaded_workbook_keeps_package_when_comment_summary_fails(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_sample_workbook(workbook_path)
     write_tracking_json(tracking_path)
 
@@ -300,7 +332,7 @@ def test_process_uploaded_workbook_reports_missing_columns(tmp_path: Path) -> No
         process_uploaded_workbook(
             input_path=workbook_path,
             tracking_json_path=tracking_path,
-            output_package_path=tmp_path / "penalty_automation_package.zip",
+            output_package_path=tmp_path / "agentic_loss_recovery_package.zip",
             approval_date="2026-03-19",
             on_step_start=lambda _step_id, _message: None,
             on_step_complete=lambda _step_id, _message: None,

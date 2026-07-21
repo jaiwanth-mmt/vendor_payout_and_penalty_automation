@@ -20,6 +20,8 @@ from backend.app.domain.category_processors import (
     FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS,
     LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS,
     enrich_cab_delay_insights_async,
+    enrich_lower_category_vehicle_async,
+    enrich_message_column,
     enrich_message_column_async,
     process_category_batch,
 )
@@ -37,6 +39,7 @@ from backend.app.domain.lower_category_vehicle import (
     VEHICLE_SUBCATEGORY_COLUMN,
     VEHICLE_TYPE_COLUMN,
 )
+from backend.app.domain.tracking_common import VENDOR_NAME_COLUMN
 from backend.app.domain.subcategories import CategoryBatch
 from backend.app.services.pipeline import process_uploaded_workbook
 from backend.tests.factories import (
@@ -85,9 +88,11 @@ def test_async_cab_delay_llm_generation_respects_concurrency_limit() -> None:
     current_calls = 0
     max_seen = 0
     progress_updates: list[dict[str, int]] = []
+    token_budgets: list[int] = []
 
-    async def async_llm(_prompt: str, _tokens: int, _effort: str) -> str:
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
         nonlocal current_calls, max_seen
+        token_budgets.append(tokens)
         current_calls += 1
         max_seen = max(max_seen, current_calls)
         await asyncio.sleep(0.01)
@@ -107,6 +112,7 @@ def test_async_cab_delay_llm_generation_respects_concurrency_limit() -> None:
     asyncio.run(run())
 
     assert max_seen == 2
+    assert token_budgets == [2048] * 4
     assert progress_updates[-1]["generated_insight_rows"] == 4
 
 
@@ -124,9 +130,11 @@ def test_async_message_classification_respects_concurrency_limit() -> None:
     )
     current_calls = 0
     max_seen = 0
+    token_budgets: list[int] = []
 
-    async def async_llm(_prompt: str, _tokens: int, _effort: str) -> str:
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
         nonlocal current_calls, max_seen
+        token_budgets.append(tokens)
         current_calls += 1
         max_seen = max(max_seen, current_calls)
         await asyncio.sleep(0.01)
@@ -143,13 +151,145 @@ def test_async_message_classification_respects_concurrency_limit() -> None:
     output = asyncio.run(run())
 
     assert max_seen == 2
+    assert token_budgets == [2048] * 4
     assert output[MESSAGE_COLUMN].tolist() == ["Extra Money Taken"] * 4
+
+
+def test_message_classification_repairs_empty_first_response_for_non_cab_category() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B8",
+                "Sub Category": "AC not working",
+                "Remarks": "AC not working",
+                COMMENTS_COLUMN: "Customer said the car air conditioner was not working during the ride.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    def llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return '{"categories": []}'
+        return '{"categories": ["AC Not Working"]}'
+
+    output = enrich_message_column(df, llm_generator=llm)
+
+    assert output.loc[0, MESSAGE_COLUMN] == "AC Not Working"
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
+
+
+def test_async_message_classification_repairs_unmappable_first_response_for_non_cab_category() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B9",
+                "Sub Category": "Vehicle Condition",
+                "Remarks": "dirty vehicle",
+                COMMENTS_COLUMN: "Customer reported the cab was dirty and smelled bad.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    async def async_llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        await asyncio.sleep(0)
+        if len(prompts) == 1:
+            return '{"categories": ["Cab Cleanliness"]}'
+        return '{"categories": ["Poor Vehicle Condition"]}'
+
+    async def run() -> pd.DataFrame:
+        return await enrich_message_column_async(
+            df,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+
+    output = asyncio.run(run())
+
+    assert output.loc[0, MESSAGE_COLUMN] == "Poor Vehicle Condition"
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
+
+
+def test_async_message_classification_leaves_blank_after_failed_repair() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B10",
+                "Sub Category": "Extra Money Taken",
+                "Remarks": "driver collected extra",
+                COMMENTS_COLUMN: "Customer said driver collected extra cash.",
+            }
+        ]
+    )
+    prompts: list[str] = []
+
+    async def async_llm(prompt: str, _tokens: int, _effort: str) -> str:
+        prompts.append(prompt)
+        await asyncio.sleep(0)
+        return "not json"
+
+    async def run() -> pd.DataFrame:
+        return await enrich_message_column_async(
+            df,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+
+    output = asyncio.run(run())
+
+    assert output.loc[0, MESSAGE_COLUMN] == ""
+    assert len(prompts) == 2
+    assert "Repair a previous complaint category classification" in prompts[1]
+
+
+def test_async_lower_category_vehicle_extraction_uses_large_default_token_budget() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B7",
+                "Sub Category": "Lower Category Vehicle",
+                "Remarks": "low category vehicle",
+            }
+        ]
+    )
+    tracking_bookings = {
+        "B7": {
+            "tracking_reports_raw": [{"vehicle_subcategory": "basic-electric", "vehicle_type": "sedan"}],
+            "comments": "Customer booked an electric sedan but received a CNG hatchback instead.",
+        }
+    }
+    token_budgets: list[int] = []
+
+    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
+        token_budgets.append(tokens)
+        return '{"customer_booked_vehicle": "electric sedan", "customer_received_vehicle": "CNG hatchback"}'
+
+    async def run() -> pd.DataFrame:
+        output, warnings = await enrich_lower_category_vehicle_async(
+            df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=async_llm,
+            llm_concurrency=1,
+        )
+        assert warnings == []
+        return output
+
+    output = asyncio.run(run())
+
+    assert token_budgets == [2048]
+    assert output.loc[0, CUSTOMER_BOOKED_VEHICLE_COLUMN] == "electric sedan"
+    assert output.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
 
 
 def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
     write_tracking_json_with_extra_money(tracking_path)
 
@@ -181,20 +321,18 @@ def test_extra_money_taken_package_includes_tracking_columns(tmp_path: Path) -> 
     assert output_df.loc[0, "cash_collected"] == 1000
     assert output_df.loc[0, "extra_travelled_fare"] == 90
     assert output_df.loc[0, "airport_entry_fee"] == 200
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "taxibazaar"
     assert output_df.loc[0, "comments"] == "Customer said driver collected extra cash for toll and parking."
     assert output_df.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
     assert extra_money_category["output_columns"] == EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS
-    assert extra_money_category["preview_rows"][0]["total_driver_charge"] == 150
-    assert extra_money_category["preview_rows"][0]["comments"] == (
-        "Customer said driver collected extra cash for toll and parking."
-    )
-    assert extra_money_category["preview_rows"][0][MESSAGE_COLUMN] == "Extra Money Taken"
+    assert extra_money_category["row_count"] == 1
+    assert "preview_rows" not in extra_money_category
 
 
 def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_fulfillment_workbook(workbook_path)
     write_tracking_json_with_fulfillment(tracking_path)
 
@@ -225,22 +363,21 @@ def test_fulfillment_not_done_package_includes_tracking_status_and_times(tmp_pat
     assert output_df.loc[0, "amount_paid"] == 566
     assert output_df.loc[0, "route_toll_charges"] == 80
     assert output_df.loc[0, "airport_entry_fee"] == 200
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "rideally"
     assert output_df.loc[0, COMMENTS_COLUMN] == "Customer said the assigned cab did not arrive for the airport pickup."
     assert output_df.loc[0, FULFILLMENT_PREFERRED_START_TIME_COLUMN] == "19 Mar 2026 3:15 AM"
     assert output_df.loc[0, FULFILLMENT_DRIVER_STARTED_COLUMN] == "19 Mar 2026 3:21:38 AM"
     assert output_df.loc[0, FULFILLMENT_DRIVER_ARRIVED_COLUMN] == "19 Mar 2026 3:21:44 AM"
     assert output_df.loc[0, MESSAGE_COLUMN] == "Vendor No Show"
     assert fulfillment_category["output_columns"] == FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS
-    assert fulfillment_category["preview_rows"][0][FULFILLMENT_PREFERRED_START_TIME_COLUMN] == (
-        "19 Mar 2026 3:15 AM"
-    )
-    assert fulfillment_category["preview_rows"][0][MESSAGE_COLUMN] == "Vendor No Show"
+    assert fulfillment_category["row_count"] == 1
+    assert "preview_rows" not in fulfillment_category
 
 
 def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_lower_category_workbook(workbook_path)
     write_tracking_json_with_lower_category(tracking_path)
 
@@ -271,6 +408,7 @@ def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_pa
     assert output_df.loc[0, "driver_charge_per_day"] == 170
     assert output_df.loc[0, VEHICLE_SUBCATEGORY_COLUMN] == "basic-electric"
     assert output_df.loc[0, VEHICLE_TYPE_COLUMN] == "sedan"
+    assert output_df.loc[0, VENDOR_NAME_COLUMN] == "wticabs"
     assert output_df.loc[0, COMMENTS_COLUMN] == (
         "Customer booked an electric sedan but received a CNG hatchback instead."
     )
@@ -278,15 +416,14 @@ def test_lower_category_vehicle_package_includes_tracking_and_llm_columns(tmp_pa
     assert output_df.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
     assert output_df.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
     assert lower_category["output_columns"] == LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS
-    assert lower_category["preview_rows"][0][CUSTOMER_BOOKED_VEHICLE_COLUMN] == "electric sedan"
-    assert lower_category["preview_rows"][0][CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
-    assert lower_category["preview_rows"][0][MESSAGE_COLUMN] == "Low Category Vehicle"
+    assert lower_category["row_count"] == 1
+    assert "preview_rows" not in lower_category
 
 
 def test_lower_category_vehicle_llm_failure_warns_and_leaves_values_blank(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "penalty_automation_package.zip"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_lower_category_workbook(workbook_path)
     write_tracking_json_with_lower_category(tracking_path)
 
@@ -310,7 +447,8 @@ def test_lower_category_vehicle_llm_failure_warns_and_leaves_values_blank(tmp_pa
     assert result.category_outputs[0]["status"] == "completed"
     assert output_df.loc[0, CUSTOMER_BOOKED_VEHICLE_COLUMN] == ""
     assert output_df.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == ""
-    assert output_df.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
+    assert output_df.loc[0, MESSAGE_COLUMN] == ""
+    assert output_df.loc[0, "agent_review_status"] == "needs_review"
     assert warnings == [
         {
             "code": "lower_category_vehicle_extraction_failed",
@@ -368,6 +506,7 @@ def test_extra_money_processor_adds_tracking_fields_without_cab_columns() -> Non
                     "type": "LOCAL_RENTAL",
                     "ttrip_type": "local",
                     "amount": 840,
+                    "vendor_name": "quickride",
                     "base_amount": 800,
                     "amount_paid": 200,
                     "cash_collected": 640,
@@ -399,6 +538,7 @@ def test_extra_money_processor_adds_tracking_fields_without_cab_columns() -> Non
 
     assert outcome.df.columns.tolist() == EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS
     assert outcome.df.loc[0, "type"] == "LOCAL_RENTAL"
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "quickride"
     assert outcome.df.loc[0, "extra_travelled"] == 8.11
     assert outcome.df.loc[0, "comments"] == "Customer disputed extra cash collection."
     assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
@@ -427,6 +567,7 @@ def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insight
                     "dispatch_id": "dispatch-b6",
                     "booking_status": "CONFIRMED",
                     "tracking_status": "NOT BOARDED",
+                    "vendor_name": "rideally",
                     "start_time": "2026-03-18 21:45:00",
                     "driver_started": "2026-03-19 03:21:38.764000",
                     "driver_arrived": "2026-03-19 03:21:44.001000",
@@ -444,6 +585,7 @@ def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insight
 
     assert outcome.df.columns.tolist() == FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b6")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "rideally"
     assert outcome.df.loc[0, BOOKING_STATUS_COLUMN] == "CONFIRMED"
     assert outcome.df.loc[0, TRACKING_STATUS_COLUMN] == "NOT BOARDED"
     assert outcome.df.loc[0, COMMENTS_COLUMN] == "Customer said the cab did not arrive."
@@ -475,6 +617,7 @@ def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_c
             "tracking_reports_raw": [
                 {
                     "dispatch_id": "dispatch-b7",
+                    "vendor_name": "wticabs",
                     "vehicle_subcategory": "basic-electric",
                     "vehicle_type": "sedan",
                 }
@@ -491,6 +634,7 @@ def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_c
 
     assert outcome.df.columns.tolist() == LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b7")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "wticabs"
     assert outcome.df.loc[0, VEHICLE_SUBCATEGORY_COLUMN] == "basic-electric"
     assert outcome.df.loc[0, VEHICLE_TYPE_COLUMN] == "sedan"
     assert outcome.df.loc[0, COMMENTS_COLUMN] == (
@@ -525,6 +669,7 @@ def test_other_category_processors_add_common_tracking_amount_fields() -> None:
             "tracking_reports_raw": [
                 {
                     "dispatch_id": "dispatch-b3",
+                    "vendor_name": "savaari",
                     "amount": 980,
                     "base_amount": 900,
                     "amount_paid": 100,
@@ -556,6 +701,7 @@ def test_other_category_processors_add_common_tracking_amount_fields() -> None:
 
     assert outcome.df.columns.tolist() == COMMON_PROCESSED_OUTPUT_COLUMNS
     assert_complaint_metadata(outcome.df.loc[0], "dispatch-b3")
+    assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "savaari"
     assert outcome.df.loc[0, "amount"] == 980
     assert outcome.df.loc[0, "cash_collected"] == 880
     assert outcome.df.loc[0, "extra_travelled_fare"] == 66

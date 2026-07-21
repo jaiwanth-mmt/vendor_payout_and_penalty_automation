@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from math import ceil
@@ -15,13 +15,24 @@ from openpyxl import load_workbook
 
 from backend.app.core.env import load_env_file
 from backend.app.core.paths import DEFAULT_APPROVAL_DATE, DEMO_TRACKING_JSON_PATH, JOB_RUNTIME_ROOT, REPO_ROOT
-from backend.app.models import CreateJobResponse, FinalOutputPreviewResponse, JobResponse
+from backend.app.agents.orchestrator import review_queue_row
+from backend.app.models import (
+    AgentCasesPageResponse,
+    CategoryPreviewResponse,
+    CreateJobResponse,
+    FinalOutputPreviewResponse,
+    JobResponse,
+    ReviewQueuePageResponse,
+)
 from backend.app.services.job_store import JobStore
+from backend.app.services.package_builder import PACKAGE_FILENAME
 from backend.app.services.pipeline import process_uploaded_workbook_async
 
 
 RUNTIME_DIR = JOB_RUNTIME_ROOT
 TRACKING_JSON_PATH = DEMO_TRACKING_JSON_PATH
+AGENT_PAGE_SIZE = 5
+CATEGORY_PREVIEW_PAGE_SIZE = 5
 
 load_env_file(REPO_ROOT / ".env")
 
@@ -32,7 +43,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Penalty Automation API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Agentic Loss Recovery Copilot API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -102,7 +113,7 @@ def download_job(job_id: str) -> FileResponse:
     if snapshot.status != "succeeded" or package_path is None or not package_path.exists():
         raise HTTPException(status_code=409, detail="ZIP package is not ready yet")
 
-    filename = f"penalty_automation_{snapshot.approval_date}.zip"
+    filename = f"agentic_loss_recovery_{snapshot.approval_date}.zip"
     return FileResponse(package_path, media_type="application/zip", filename=filename)
 
 
@@ -129,6 +140,7 @@ def preview_final_output(
     job_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
+    booking_id: str | None = Query(None),
 ) -> FinalOutputPreviewResponse:
     try:
         snapshot = job_store.snapshot(job_id)
@@ -139,7 +151,138 @@ def preview_final_output(
     if snapshot.status != "succeeded" or final_output_path is None or not final_output_path.exists():
         raise HTTPException(status_code=409, detail="Final output is not ready yet")
 
-    return read_final_output_preview(final_output_path, page=page, page_size=page_size)
+    return read_final_output_preview(
+        final_output_path,
+        page=page,
+        page_size=page_size,
+        booking_id=booking_id,
+    )
+
+
+@app.get("/api/jobs/{job_id}/categories/{slug}/preview", response_model=CategoryPreviewResponse)
+def preview_category(
+    job_id: str,
+    slug: str,
+    page: int = Query(1, ge=1),
+    booking_id: str | None = Query(None),
+) -> CategoryPreviewResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status != "succeeded":
+        raise HTTPException(status_code=409, detail="Category preview is not ready yet")
+
+    category_path = job_store.get_category_processed_path(job_id, slug)
+    if category_path is None:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if not category_path.exists():
+        raise HTTPException(status_code=409, detail="Category preview is not ready yet")
+
+    return read_category_preview(
+        category_path,
+        page=page,
+        page_size=CATEGORY_PREVIEW_PAGE_SIZE,
+        booking_id=booking_id,
+    )
+
+
+@app.get("/api/jobs/{job_id}/agent-audit/download")
+def download_agent_audit(job_id: str) -> FileResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    path = job_store.get_agent_audit_path(job_id)
+    if snapshot.status != "succeeded" or path is None or not path.exists():
+        raise HTTPException(status_code=409, detail="Agent audit workbook is not ready yet")
+
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="agent_audit.xlsx",
+    )
+
+
+@app.get("/api/jobs/{job_id}/review-queue/download")
+def download_review_queue(job_id: str) -> FileResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    path = job_store.get_review_queue_path(job_id)
+    if snapshot.status != "succeeded" or path is None or not path.exists():
+        raise HTTPException(status_code=409, detail="Review queue workbook is not ready yet")
+
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="review_queue.xlsx",
+    )
+
+
+@app.get("/api/jobs/{job_id}/review-queue", response_model=ReviewQueuePageResponse)
+def list_review_queue(job_id: str, page: int = Query(1, ge=1)) -> ReviewQueuePageResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status != "succeeded":
+        raise HTTPException(status_code=409, detail="Review queue is not ready yet")
+
+    items = [review_queue_row(case) for case in cases if case.get("review_status") != "auto_ready"]
+    page_items, safe_page, total_pages = paginate_items(items, page=page, page_size=AGENT_PAGE_SIZE)
+    return ReviewQueuePageResponse(
+        items=page_items,
+        item_count=len(items),
+        page=safe_page,
+        page_size=AGENT_PAGE_SIZE,
+        total_pages=total_pages,
+    )
+
+
+@app.get("/api/jobs/{job_id}/cases", response_model=AgentCasesPageResponse)
+def list_agent_cases(job_id: str, page: int = Query(1, ge=1)) -> AgentCasesPageResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status != "succeeded":
+        raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
+
+    page_cases, safe_page, total_pages = paginate_items(cases, page=page, page_size=AGENT_PAGE_SIZE)
+    return AgentCasesPageResponse(
+        cases=page_cases,
+        case_count=len(cases),
+        page=safe_page,
+        page_size=AGENT_PAGE_SIZE,
+        total_pages=total_pages,
+    )
+
+
+@app.get("/api/jobs/{job_id}/cases/{booking_id}")
+def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status != "succeeded":
+        raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
+
+    for case in cases:
+        if str(case.get("booking_id", "")).strip() == booking_id:
+            return case
+
+    raise HTTPException(status_code=404, detail="Agent case not found")
 
 
 async def run_processing_job(job_id: str, upload_path: Path, approval_date: str, job_dir: Path) -> None:
@@ -147,7 +290,7 @@ async def run_processing_job(job_id: str, upload_path: Path, approval_date: str,
         result = await process_uploaded_workbook_async(
             input_path=upload_path,
             tracking_json_path=TRACKING_JSON_PATH,
-            output_package_path=job_dir / "penalty_automation_package.zip",
+            output_package_path=job_dir / PACKAGE_FILENAME,
             approval_date=approval_date,
             on_step_start=lambda step_id, message: job_store.mark_step_running(job_id, step_id, message),
             on_step_complete=lambda step_id, message: job_store.mark_step_completed(job_id, step_id, message),
@@ -172,6 +315,13 @@ async def run_processing_job(job_id: str, upload_path: Path, approval_date: str,
             package_path=result.package_path,
             final_output_path=result.final_output_path,
             final_output=result.final_output,
+            agent_audit_path=result.agent_audit_path,
+            review_queue_path=result.review_queue_path,
+            agent_summary_path=result.agent_summary_path,
+            agent_summary=result.agent_summary,
+            case_counts=result.case_counts,
+            agent_progress=result.agent_progress,
+            agent_cases=result.agent_cases,
         )
     except Exception as error:
         job_store.fail_job(job_id, str(error))
@@ -190,18 +340,58 @@ def validate_upload(file: UploadFile) -> None:
         raise HTTPException(status_code=400, detail="Upload a QlikSense Excel workbook (.xlsx or .xls)")
 
 
-def read_final_output_preview(path: Path, *, page: int, page_size: int) -> FinalOutputPreviewResponse:
+def read_final_output_preview(
+    path: Path,
+    *,
+    page: int,
+    page_size: int,
+    booking_id: str | None = None,
+) -> FinalOutputPreviewResponse:
+    return FinalOutputPreviewResponse(
+        **read_workbook_rows_page(path, page=page, page_size=page_size, booking_id=booking_id)
+    )
+
+
+def read_category_preview(
+    path: Path,
+    *,
+    page: int,
+    page_size: int,
+    booking_id: str | None = None,
+) -> CategoryPreviewResponse:
+    return CategoryPreviewResponse(
+        **read_workbook_rows_page(path, page=page, page_size=page_size, booking_id=booking_id)
+    )
+
+
+def read_workbook_rows_page(
+    path: Path,
+    *,
+    page: int,
+    page_size: int,
+    booking_id: str | None = None,
+) -> dict[str, Any]:
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         worksheet = workbook.active
+        worksheet_rows = worksheet.iter_rows(values_only=True)
+        columns = [str(column or "") for column in next(worksheet_rows, ())]
+
+        booking_filter = normalize_booking_id_filter(booking_id)
+        if booking_filter:
+            return read_filtered_workbook_rows_page(
+                worksheet_rows,
+                columns=columns,
+                page=page,
+                page_size=page_size,
+                booking_id=booking_filter,
+            )
+
         row_count = max((worksheet.max_row or 1) - 1, 0)
         total_pages = max(1, ceil(row_count / page_size))
         safe_page = min(page, total_pages)
         start_index = (safe_page - 1) * page_size
         end_index = start_index + page_size
-
-        worksheet_rows = worksheet.iter_rows(values_only=True)
-        columns = [str(column or "") for column in next(worksheet_rows, ())]
         rows: list[dict[str, Any]] = []
 
         for row_index, values in enumerate(worksheet_rows):
@@ -209,23 +399,83 @@ def read_final_output_preview(path: Path, *, page: int, page_size: int) -> Final
                 continue
             if row_index >= end_index:
                 break
-            rows.append(
-                {
-                    column: serialize_preview_cell(values[column_index] if column_index < len(values) else None)
-                    for column_index, column in enumerate(columns)
-                }
-            )
+            rows.append(serialize_preview_row(columns, values))
 
-        return FinalOutputPreviewResponse(
-            columns=columns,
-            rows=rows,
-            row_count=row_count,
-            page=safe_page,
-            page_size=page_size,
-            total_pages=total_pages,
-        )
+        return {
+            "columns": columns,
+            "rows": rows,
+            "row_count": row_count,
+            "page": safe_page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     finally:
         workbook.close()
+
+
+def read_filtered_workbook_rows_page(
+    worksheet_rows: Iterator[tuple[Any, ...]],
+    *,
+    columns: list[str],
+    page: int,
+    page_size: int,
+    booking_id: str,
+) -> dict[str, Any]:
+    booking_id_column_index = find_booking_id_column_index(columns)
+    matching_rows: list[dict[str, Any]] = []
+
+    if booking_id_column_index is not None:
+        for values in worksheet_rows:
+            if row_booking_id(values, booking_id_column_index) == booking_id:
+                matching_rows.append(serialize_preview_row(columns, values))
+
+    row_count = len(matching_rows)
+    total_pages = max(1, ceil(row_count / page_size))
+    safe_page = min(page, total_pages)
+    start_index = (safe_page - 1) * page_size
+    end_index = start_index + page_size
+
+    return {
+        "columns": columns,
+        "rows": matching_rows[start_index:end_index],
+        "row_count": row_count,
+        "page": safe_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
+def normalize_booking_id_filter(value: str | None) -> str:
+    return str(value or "").strip()
+
+
+def find_booking_id_column_index(columns: list[str]) -> int | None:
+    for index, column in enumerate(columns):
+        normalized_column = column.strip().lower().replace(" ", "_")
+        if normalized_column == "booking_id":
+            return index
+    return None
+
+
+def row_booking_id(values: tuple[Any, ...], column_index: int) -> str:
+    if column_index >= len(values):
+        return ""
+    return str(values[column_index] or "").strip()
+
+
+def serialize_preview_row(columns: list[str], values: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        column: serialize_preview_cell(values[column_index] if column_index < len(values) else None)
+        for column_index, column in enumerate(columns)
+    }
+
+
+def paginate_items(items: list[Any], *, page: int, page_size: int) -> tuple[list[Any], int, int]:
+    total_pages = max(1, ceil(len(items) / page_size))
+    safe_page = min(page, total_pages)
+    start_index = (safe_page - 1) * page_size
+    end_index = start_index + page_size
+    return items[start_index:end_index], safe_page, total_pages
 
 
 def serialize_preview_cell(value: Any) -> Any:

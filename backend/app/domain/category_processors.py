@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from backend.app.agents import AGENT_OUTPUT_COLUMNS, investigate_category_frame, investigate_category_frame_async
 from backend.app.domain.cab_delay_enrichment import (
     CAB_DELAY_ENRICHMENT_COLUMNS,
     COMMENTS_COLUMN,
@@ -26,9 +27,9 @@ from backend.app.domain.cab_delay_enrichment import (
 )
 from backend.app.domain.complaint_message import (
     MESSAGE_COLUMN,
-    build_fallback_message,
     build_message_classification_prompt,
     build_message_from_response,
+    build_message_repair_prompt,
 )
 from backend.app.domain.extra_money_taken import (
     EXTRA_MONEY_TAKEN_ENRICHMENT_COLUMNS,
@@ -69,22 +70,25 @@ FULFILLMENT_NOT_DONE_CATEGORY = "FULFILLMENT NOT DONE"
 LOWER_CATEGORY_VEHICLE_CATEGORY = "Lower Category Vehicle"
 
 COMMON_PROCESSED_BASE_COLUMNS = [*FINAL_OUTPUT_COLUMNS, *COMMON_TRACKING_COLUMNS]
-COMMON_PROCESSED_OUTPUT_COLUMNS = append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, [MESSAGE_COLUMN])
+COMMON_PROCESSED_OUTPUT_COLUMNS = append_unique_columns(
+    append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, [MESSAGE_COLUMN]),
+    AGENT_OUTPUT_COLUMNS,
+)
 CAB_DELAY_OUTPUT_COLUMNS = append_unique_columns(
     append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, CAB_DELAY_ENRICHMENT_COLUMNS),
-    [MESSAGE_COLUMN],
+    [MESSAGE_COLUMN, *AGENT_OUTPUT_COLUMNS],
 )
 EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS = append_unique_columns(
     append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, EXTRA_MONEY_TAKEN_ENRICHMENT_COLUMNS),
-    [MESSAGE_COLUMN],
+    [MESSAGE_COLUMN, *AGENT_OUTPUT_COLUMNS],
 )
 FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS = append_unique_columns(
     append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, FULFILLMENT_NOT_DONE_ENRICHMENT_COLUMNS),
-    [MESSAGE_COLUMN],
+    [MESSAGE_COLUMN, *AGENT_OUTPUT_COLUMNS],
 )
 LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS = append_unique_columns(
     append_unique_columns(COMMON_PROCESSED_BASE_COLUMNS, LOWER_CATEGORY_VEHICLE_ENRICHMENT_COLUMNS),
-    [MESSAGE_COLUMN],
+    [MESSAGE_COLUMN, *AGENT_OUTPUT_COLUMNS],
 )
 
 
@@ -133,6 +137,7 @@ class CategoryProcessingOutcome:
     failed: bool = False
     error: str | None = None
     warnings: list[dict[str, Any]] = field(default_factory=list)
+    agent_cases: list[dict[str, Any]] = field(default_factory=list)
 
 
 def output_columns_for_category(category_name: str) -> list[str]:
@@ -154,20 +159,42 @@ def process_category_batch(
             llm_generator=llm_generator,
         )
         enriched_df = enrich_message_column(enriched_df, llm_generator=llm_generator)
+        enriched_df, agent_cases = investigate_category_frame(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+        )
         return CategoryProcessingOutcome(
             enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
             insight_summary,
+            agent_cases=agent_cases,
         )
 
     if batch.name == EXTRA_MONEY_TAKEN_CATEGORY:
         enriched_df = enrich_extra_money_taken_rows(base_df, tracking_bookings=tracking_bookings)
         enriched_df = enrich_message_column(enriched_df, llm_generator=llm_generator)
-        return CategoryProcessingOutcome(enriched_df.loc[:, output_columns_for_category(batch.name)].copy())
+        enriched_df, agent_cases = investigate_category_frame(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+        )
+        return CategoryProcessingOutcome(
+            enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
+            agent_cases=agent_cases,
+        )
 
     if batch.name == FULFILLMENT_NOT_DONE_CATEGORY:
         enriched_df = enrich_fulfillment_not_done_rows(base_df, tracking_bookings=tracking_bookings)
         enriched_df = enrich_message_column(enriched_df, llm_generator=llm_generator)
-        return CategoryProcessingOutcome(enriched_df.loc[:, output_columns_for_category(batch.name)].copy())
+        enriched_df, agent_cases = investigate_category_frame(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+        )
+        return CategoryProcessingOutcome(
+            enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
+            agent_cases=agent_cases,
+        )
 
     if batch.name == LOWER_CATEGORY_VEHICLE_CATEGORY:
         enriched_df, warnings = enrich_lower_category_vehicle(
@@ -176,13 +203,27 @@ def process_category_batch(
             llm_generator=llm_generator,
         )
         enriched_df = enrich_message_column(enriched_df, llm_generator=llm_generator)
+        enriched_df, agent_cases = investigate_category_frame(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+        )
         return CategoryProcessingOutcome(
             enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
             warnings=warnings,
+            agent_cases=agent_cases,
         )
 
     enriched_df = enrich_message_column(base_df, llm_generator=llm_generator)
-    return CategoryProcessingOutcome(enriched_df.loc[:, COMMON_PROCESSED_OUTPUT_COLUMNS].copy())
+    enriched_df, agent_cases = investigate_category_frame(
+        enriched_df,
+        tracking_bookings=tracking_bookings,
+        llm_generator=llm_generator,
+    )
+    return CategoryProcessingOutcome(
+        enriched_df.loc[:, COMMON_PROCESSED_OUTPUT_COLUMNS].copy(),
+        agent_cases=agent_cases,
+    )
 
 
 async def process_category_batch_async(
@@ -208,9 +249,16 @@ async def process_category_batch_async(
             llm_generator=llm_generator,
             llm_concurrency=llm_concurrency,
         )
+        enriched_df, agent_cases = await investigate_category_frame_async(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+            llm_concurrency=llm_concurrency,
+        )
         return CategoryProcessingOutcome(
             enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
             insight_summary,
+            agent_cases=agent_cases,
         )
 
     if batch.name == EXTRA_MONEY_TAKEN_CATEGORY:
@@ -224,7 +272,16 @@ async def process_category_batch_async(
             llm_generator=llm_generator,
             llm_concurrency=llm_concurrency,
         )
-        return CategoryProcessingOutcome(enriched_df.loc[:, output_columns_for_category(batch.name)].copy())
+        enriched_df, agent_cases = await investigate_category_frame_async(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+            llm_concurrency=llm_concurrency,
+        )
+        return CategoryProcessingOutcome(
+            enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
+            agent_cases=agent_cases,
+        )
 
     if batch.name == FULFILLMENT_NOT_DONE_CATEGORY:
         enriched_df = await asyncio.to_thread(
@@ -237,7 +294,16 @@ async def process_category_batch_async(
             llm_generator=llm_generator,
             llm_concurrency=llm_concurrency,
         )
-        return CategoryProcessingOutcome(enriched_df.loc[:, output_columns_for_category(batch.name)].copy())
+        enriched_df, agent_cases = await investigate_category_frame_async(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+            llm_concurrency=llm_concurrency,
+        )
+        return CategoryProcessingOutcome(
+            enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
+            agent_cases=agent_cases,
+        )
 
     if batch.name == LOWER_CATEGORY_VEHICLE_CATEGORY:
         enriched_df, warnings = await enrich_lower_category_vehicle_async(
@@ -251,9 +317,16 @@ async def process_category_batch_async(
             llm_generator=llm_generator,
             llm_concurrency=llm_concurrency,
         )
+        enriched_df, agent_cases = await investigate_category_frame_async(
+            enriched_df,
+            tracking_bookings=tracking_bookings,
+            llm_generator=llm_generator,
+            llm_concurrency=llm_concurrency,
+        )
         return CategoryProcessingOutcome(
             enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
             warnings=warnings,
+            agent_cases=agent_cases,
         )
 
     enriched_df = await enrich_message_column_async(
@@ -261,7 +334,16 @@ async def process_category_batch_async(
         llm_generator=llm_generator,
         llm_concurrency=llm_concurrency,
     )
-    return CategoryProcessingOutcome(enriched_df.loc[:, COMMON_PROCESSED_OUTPUT_COLUMNS].copy())
+    enriched_df, agent_cases = await investigate_category_frame_async(
+        enriched_df,
+        tracking_bookings=tracking_bookings,
+        llm_generator=llm_generator,
+        llm_concurrency=llm_concurrency,
+    )
+    return CategoryProcessingOutcome(
+        enriched_df.loc[:, COMMON_PROCESSED_OUTPUT_COLUMNS].copy(),
+        agent_cases=agent_cases,
+    )
 
 
 async def maybe_call_llm(
@@ -294,11 +376,125 @@ def row_text(df: pd.DataFrame, index: int, column: str) -> str:
     return str(value).strip()
 
 
+def build_message_with_repair_sync(
+    *,
+    sub_category: str,
+    remarks: str,
+    comments: str,
+    llm_generator: LlmGenerator,
+    max_completion_tokens: int,
+    reasoning_effort: str,
+) -> str:
+    prompt = build_message_classification_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+    )
+    response = ""
+    failure_reason = "empty_or_unmapped_categories"
+    try:
+        response = call_azure_or_custom_sync(
+            llm_generator,
+            prompt,
+            max_completion_tokens,
+            reasoning_effort,
+        )
+        message = build_message_from_response(
+            response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+        if message:
+            return message
+    except Exception as exc:
+        failure_reason = f"initial_classification_failed: {type(exc).__name__}"
+
+    repair_prompt = build_message_repair_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+        previous_response=response,
+        failure_reason=failure_reason,
+    )
+    try:
+        repair_response = call_azure_or_custom_sync(
+            llm_generator,
+            repair_prompt,
+            max_completion_tokens,
+            reasoning_effort,
+        )
+        return build_message_from_response(
+            repair_response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+    except Exception:
+        return ""
+
+
+async def build_message_with_repair_async(
+    *,
+    sub_category: str,
+    remarks: str,
+    comments: str,
+    llm_generator: LlmGenerator,
+    semaphore: asyncio.Semaphore,
+    max_completion_tokens: int,
+    reasoning_effort: str,
+) -> str:
+    prompt = build_message_classification_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+    )
+    response = ""
+    failure_reason = "empty_or_unmapped_categories"
+    try:
+        async with semaphore:
+            response = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
+        message = build_message_from_response(
+            response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+        if message:
+            return message
+    except Exception as exc:
+        failure_reason = f"initial_classification_failed: {type(exc).__name__}"
+
+    repair_prompt = build_message_repair_prompt(
+        sub_category=sub_category,
+        remarks=remarks,
+        comments=comments,
+        previous_response=response,
+        failure_reason=failure_reason,
+    )
+    try:
+        async with semaphore:
+            repair_response = await maybe_call_llm(
+                llm_generator,
+                repair_prompt,
+                max_completion_tokens,
+                reasoning_effort,
+            )
+        return build_message_from_response(
+            repair_response,
+            sub_category=sub_category,
+            remarks=remarks,
+            comments=comments,
+        )
+    except Exception:
+        return ""
+
+
 def enrich_message_column(
     df: pd.DataFrame,
     *,
     llm_generator: LlmGenerator,
-    max_completion_tokens: int = 256,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> pd.DataFrame:
     output = ensure_message_column(df)
@@ -307,34 +503,16 @@ def enrich_message_column(
         sub_category = row_text(output, index, "Sub Category")
         remarks = row_text(output, index, "Remarks")
         comments = row_text(output, index, COMMENTS_COLUMN)
-        prompt = build_message_classification_prompt(
+        if not (comments or remarks):
+            output.at[index, MESSAGE_COLUMN] = ""
+            continue
+        output.at[index, MESSAGE_COLUMN] = build_message_with_repair_sync(
             sub_category=sub_category,
             remarks=remarks,
             comments=comments,
-        )
-        try:
-            response = call_azure_or_custom_sync(
-                llm_generator,
-                prompt,
-                max_completion_tokens,
-                reasoning_effort,
-            )
-            message = build_message_from_response(
-                response,
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        except Exception:
-            message = build_fallback_message(
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        output.at[index, MESSAGE_COLUMN] = message or build_fallback_message(
-            sub_category=sub_category,
-            remarks=remarks,
-            comments=comments,
+            llm_generator=llm_generator,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
         )
 
     return output
@@ -345,7 +523,7 @@ async def enrich_message_column_async(
     *,
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    max_completion_tokens: int = 256,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> pd.DataFrame:
     output = ensure_message_column(df)
@@ -361,31 +539,18 @@ async def enrich_message_column_async(
     semaphore = asyncio.Semaphore(llm_concurrency)
 
     async def classify_row(index: int, sub_category: str, remarks: str, comments: str) -> tuple[int, str]:
-        prompt = build_message_classification_prompt(
+        if not (comments or remarks):
+            return index, ""
+        message = await build_message_with_repair_async(
             sub_category=sub_category,
             remarks=remarks,
             comments=comments,
+            llm_generator=llm_generator,
+            semaphore=semaphore,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
         )
-        try:
-            async with semaphore:
-                response = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
-            message = build_message_from_response(
-                response,
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        except Exception:
-            message = build_fallback_message(
-                sub_category=sub_category,
-                remarks=remarks,
-                comments=comments,
-            )
-        return index, message or build_fallback_message(
-            sub_category=sub_category,
-            remarks=remarks,
-            comments=comments,
-        )
+        return index, message
 
     tasks = [asyncio.create_task(classify_row(*row)) for row in rows]
     for task in asyncio.as_completed(tasks):
@@ -400,7 +565,7 @@ def enrich_lower_category_vehicle(
     *,
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
-    max_completion_tokens: int = 256,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     output = ensure_lower_category_vehicle_columns(df)
@@ -444,7 +609,7 @@ async def enrich_lower_category_vehicle_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    max_completion_tokens: int = 256,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     output = ensure_lower_category_vehicle_columns(df)
@@ -521,7 +686,7 @@ def enrich_cab_delay_insights(
     *,
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
-    max_completion_tokens: int = 512,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> tuple[pd.DataFrame, InsightSummary]:
     output = ensure_enrichment_columns(df)
@@ -620,7 +785,7 @@ async def enrich_cab_delay_insights_async(
     llm_generator: LlmGenerator,
     llm_concurrency: int,
     on_progress: Callable[[dict[str, int], str], None],
-    max_completion_tokens: int = 512,
+    max_completion_tokens: int = 2048,
     reasoning_effort: str = "minimal",
 ) -> tuple[pd.DataFrame, InsightSummary]:
     output = ensure_enrichment_columns(df)

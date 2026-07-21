@@ -54,6 +54,9 @@ class JobStore:
                 "upload_path": upload_path,
                 "package_path": None,
                 "final_output_path": None,
+                "agent_audit_path": None,
+                "review_queue_path": None,
+                "agent_summary_path": None,
                 "steps": [
                     {
                         "id": step_id,
@@ -72,6 +75,10 @@ class JobStore:
                 "category_progress": [],
                 "category_outputs": [],
                 "final_output": None,
+                "agent_summary": None,
+                "case_counts": {},
+                "agent_progress": [],
+                "agent_cases": [],
                 "download_ready": False,
                 "error": None,
             }
@@ -185,6 +192,13 @@ class JobStore:
         package_path: Path,
         final_output_path: Path,
         final_output: dict[str, Any],
+        agent_audit_path: Path,
+        review_queue_path: Path,
+        agent_summary_path: Path,
+        agent_summary: dict[str, Any],
+        case_counts: dict[str, int],
+        agent_progress: list[dict[str, Any]],
+        agent_cases: list[dict[str, Any]],
     ) -> None:
         with self._lock:
             job = self._get_job(job_id)
@@ -196,6 +210,13 @@ class JobStore:
             job["package_path"] = package_path
             job["final_output_path"] = final_output_path
             job["final_output"] = final_output
+            job["agent_audit_path"] = agent_audit_path
+            job["review_queue_path"] = review_queue_path
+            job["agent_summary_path"] = agent_summary_path
+            job["agent_summary"] = agent_summary
+            job["case_counts"] = case_counts
+            job["agent_progress"] = agent_progress
+            job["agent_cases"] = agent_cases
             job["download_ready"] = package_path.exists()
             job["updated_at"] = now
 
@@ -220,7 +241,17 @@ class JobStore:
         payload = {
             key: value
             for key, value in job.items()
-            if key not in {"job_dir", "upload_path", "package_path", "final_output_path"}
+            if key
+            not in {
+                "job_dir",
+                "upload_path",
+                "package_path",
+                "final_output_path",
+                "agent_audit_path",
+                "review_queue_path",
+                "agent_summary_path",
+                "agent_cases",
+            }
         }
         payload["warnings"] = [WarningItem(**warning) for warning in payload["warnings"]]
         return JobResponse(**payload)
@@ -234,6 +265,33 @@ class JobStore:
         with self._lock:
             final_output_path = self._get_job(job_id).get("final_output_path")
             return Path(final_output_path) if final_output_path else None
+
+    def get_agent_audit_path(self, job_id: str) -> Path | None:
+        with self._lock:
+            path = self._get_job(job_id).get("agent_audit_path")
+            return Path(path) if path else None
+
+    def get_review_queue_path(self, job_id: str) -> Path | None:
+        with self._lock:
+            path = self._get_job(job_id).get("review_queue_path")
+            return Path(path) if path else None
+
+    def get_category_processed_path(self, job_id: str, slug: str) -> Path | None:
+        with self._lock:
+            job = self._get_job(job_id)
+            job_dir = job.get("job_dir")
+            if job_dir is None:
+                return None
+
+            for category in job.get("category_outputs", []):
+                if category.get("slug") == slug:
+                    filename = category.get("processed_filename")
+                    return Path(job_dir) / filename if filename else None
+            return None
+
+    def get_agent_cases(self, job_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return deepcopy(self._get_job(job_id).get("agent_cases", []))
 
     def _get_job(self, job_id: str) -> dict[str, Any]:
         if job_id not in self._jobs:

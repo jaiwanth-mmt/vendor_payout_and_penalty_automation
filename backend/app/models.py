@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-StepStatus = Literal["pending", "running", "completed", "failed"]
+StepStatus = Literal["pending", "running", "completed", "warning", "failed"]
 JobStatus = Literal["queued", "running", "succeeded", "failed"]
 
 
@@ -33,7 +33,6 @@ class CategoryOutput(BaseModel):
     output_columns: list[str] = Field(default_factory=list)
     prepared_filename: str
     processed_filename: str
-    preview_rows: list[dict[str, Any]] = Field(default_factory=list)
     status: StepStatus = "completed"
     error: str | None = None
 
@@ -49,6 +48,73 @@ class FinalOutputPreviewResponse(BaseModel):
     columns: list[str] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)
     row_count: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class CategoryPreviewResponse(BaseModel):
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ReviewQueueItem(BaseModel):
+    booking_id: str
+    sub_category: str
+    message: str = ""
+    recoverable_amount: float | int
+    review_status: str
+    decision: str
+    confidence: float | int
+    recommended_action: str
+    review_reason: str
+    rationale: str = ""
+    source_used: str = ""
+    source_categories: str = ""
+    row_categories: str = ""
+    source_alignment_status: str = ""
+    source_alignment_reason: str = ""
+    evidence_ids: str = ""
+
+
+class ReviewQueuePageResponse(BaseModel):
+    items: list[ReviewQueueItem] = Field(default_factory=list)
+    item_count: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class AgentProgressItem(BaseModel):
+    agent: str
+    status: StepStatus
+    completed_units: int = 0
+    total_units: int = 0
+    message: str = ""
+
+
+class AgentSummary(BaseModel):
+    executive_summary: str = ""
+    case_counts: dict[str, int] = Field(default_factory=dict)
+    total_recoverable_amount: float = 0
+    high_confidence_case_count: int = 0
+    high_confidence_recoverable_amount: float = 0
+    top_complaint_drivers: list[str] = Field(default_factory=list)
+    category_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    top_vendors_by_penalty: list[dict[str, Any]] = Field(default_factory=list)
+    top_subcategories_by_penalty: list[dict[str, Any]] = Field(default_factory=list)
+    top_subcategories_by_count: list[dict[str, Any]] = Field(default_factory=list)
+    missing_data_hotspots: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
+class AgentCasesPageResponse(BaseModel):
+    cases: list[dict[str, Any]] = Field(default_factory=list)
+    case_count: int
     page: int
     page_size: int
     total_pages: int
@@ -88,6 +154,9 @@ class JobResponse(BaseModel):
     category_progress: list[CategoryProgress] = Field(default_factory=list)
     category_outputs: list[CategoryOutput] = Field(default_factory=list)
     final_output: FinalOutputSummary | None = None
+    agent_summary: AgentSummary | None = None
+    case_counts: dict[str, int] = Field(default_factory=dict)
+    agent_progress: list[AgentProgressItem] = Field(default_factory=list)
     download_ready: bool = False
     error: str | None = None
 
