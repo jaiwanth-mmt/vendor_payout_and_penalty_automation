@@ -1,4 +1,5 @@
-export const DEFAULT_DATE = "2026-03-19";
+export const DEFAULT_START_DATE = "2026-03-19";
+export const DEFAULT_END_DATE = "2026-03-19";
 
 export const METRIC_LABELS: Record<string, string> = {
   agent_total_cases: "Total cases",

@@ -212,7 +212,8 @@ export type JobResponse = {
   status: JobStatus;
   current_step: string | null;
   original_filename: string;
-  approval_date: string;
+  start_date: string;
+  end_date: string;
   created_at: string;
   updated_at: string;
   steps: StepState[];

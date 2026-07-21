@@ -14,8 +14,9 @@ from fastapi.responses import FileResponse
 from openpyxl import load_workbook
 
 from backend.app.core.env import load_env_file
-from backend.app.core.paths import DEFAULT_APPROVAL_DATE, DEMO_TRACKING_JSON_PATH, JOB_RUNTIME_ROOT, REPO_ROOT
+from backend.app.core.paths import DEFAULT_END_DATE, DEFAULT_START_DATE, JOB_RUNTIME_ROOT, REPO_ROOT
 from backend.app.agents.orchestrator import review_queue_row
+from backend.app.integrations.tracking import live_tracking_repository_from_env
 from backend.app.models import (
     AgentCasesPageResponse,
     CategoryPreviewResponse,
@@ -30,7 +31,6 @@ from backend.app.services.pipeline import process_uploaded_workbook_async
 
 
 RUNTIME_DIR = JOB_RUNTIME_ROOT
-TRACKING_JSON_PATH = DEMO_TRACKING_JSON_PATH
 AGENT_PAGE_SIZE = 5
 CATEGORY_PREVIEW_PAGE_SIZE = 5
 
@@ -69,9 +69,10 @@ def health() -> dict[str, str]:
 async def create_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    approval_date: str = Form(DEFAULT_APPROVAL_DATE),
+    start_date: str = Form(DEFAULT_START_DATE),
+    end_date: str = Form(DEFAULT_END_DATE),
 ) -> CreateJobResponse:
-    validate_approval_date(approval_date)
+    validate_date_range(start_date, end_date)
     validate_upload(file)
 
     job_id = uuid4().hex
@@ -83,14 +84,15 @@ async def create_job(
     job_store.create_job(
         job_id=job_id,
         original_filename=file.filename or "uploaded-workbook.xlsx",
-        approval_date=approval_date,
+        start_date=start_date,
+        end_date=end_date,
         job_dir=job_dir,
         upload_path=upload_path,
     )
     job_store.mark_step_running(job_id, "upload_received", "Workbook uploaded")
     job_store.mark_step_completed(job_id, "upload_received", "Upload stored securely")
 
-    background_tasks.add_task(run_processing_job, job_id, upload_path, approval_date, job_dir)
+    background_tasks.add_task(run_processing_job, job_id, upload_path, start_date, end_date, job_dir)
     return CreateJobResponse(job_id=job_id, status="queued")
 
 
@@ -113,7 +115,7 @@ def download_job(job_id: str) -> FileResponse:
     if snapshot.status != "succeeded" or package_path is None or not package_path.exists():
         raise HTTPException(status_code=409, detail="ZIP package is not ready yet")
 
-    filename = f"agentic_loss_recovery_{snapshot.approval_date}.zip"
+    filename = f"agentic_loss_recovery_{snapshot.start_date}_to_{snapshot.end_date}.zip"
     return FileResponse(package_path, media_type="application/zip", filename=filename)
 
 
@@ -285,13 +287,21 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Agent case not found")
 
 
-async def run_processing_job(job_id: str, upload_path: Path, approval_date: str, job_dir: Path) -> None:
+async def run_processing_job(
+    job_id: str,
+    upload_path: Path,
+    start_date: str,
+    end_date: str,
+    job_dir: Path,
+) -> None:
     try:
+        tracking_repository = live_tracking_repository_from_env()
         result = await process_uploaded_workbook_async(
             input_path=upload_path,
-            tracking_json_path=TRACKING_JSON_PATH,
+            tracking_repository=tracking_repository,
             output_package_path=job_dir / PACKAGE_FILENAME,
-            approval_date=approval_date,
+            start_date=start_date,
+            end_date=end_date,
             on_step_start=lambda step_id, message: job_store.mark_step_running(job_id, step_id, message),
             on_step_complete=lambda step_id, message: job_store.mark_step_completed(job_id, step_id, message),
             on_warning=lambda warning: job_store.add_warning(job_id, warning),
@@ -327,11 +337,21 @@ async def run_processing_job(job_id: str, upload_path: Path, approval_date: str,
         job_store.fail_job(job_id, str(error))
 
 
-def validate_approval_date(value: str) -> None:
+def validate_iso_date(value: str, *, field_name: str) -> None:
     try:
         datetime.strptime(value, "%Y-%m-%d")
     except ValueError as error:
-        raise HTTPException(status_code=422, detail="approval_date must be in YYYY-MM-DD format") from error
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_name} must be in YYYY-MM-DD format",
+        ) from error
+
+
+def validate_date_range(start_date: str, end_date: str) -> None:
+    validate_iso_date(start_date, field_name="start_date")
+    validate_iso_date(end_date, field_name="end_date")
+    if start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be on or before end_date")
 
 
 def validate_upload(file: UploadFile) -> None:

@@ -426,40 +426,6 @@ def primary_source(case: ClaimCase) -> tuple[str, str, str, str] | None:
     return source_field, SOURCE_LABELS[source_field], source_text, evidence_id
 
 
-def primary_source_from_evidence(case: ClaimCase) -> tuple[str, str, str, str] | None:
-    evidence_by_source: dict[str, tuple[str, str]] = {}
-    for item in case.evidence:
-        if item.status != "available":
-            continue
-        source_field = clean_text(item.fields.get("source_field"))
-        if source_field not in SOURCE_HIERARCHY:
-            source_field = source_from_evidence_id(item.id)
-        if source_field not in SOURCE_HIERARCHY:
-            continue
-        source_text = clean_text(item.fields.get("text") or item.fields.get(source_field))
-        if not source_text and source_field == "comments":
-            source_text = clean_text(item.fields.get("comments"))
-        if not source_text and source_field == "remarks":
-            source_text = clean_text(item.fields.get("Remarks") or item.fields.get("remarks"))
-        if not source_text and source_field == "sub_category":
-            source_text = clean_text(item.fields.get("Sub Category") or item.fields.get("sub_category"))
-        if source_text:
-            evidence_by_source[source_field] = (source_text, item.id)
-
-    case_values = {
-        "comments": case.comments,
-        "remarks": case.remarks,
-        "sub_category": case.sub_category,
-    }
-    for source_field in SOURCE_HIERARCHY:
-        if source_field in evidence_by_source:
-            source_text, evidence_id = evidence_by_source[source_field]
-            return source_field, SOURCE_LABELS[source_field], source_text, evidence_id
-        source_text = clean_text(case_values[source_field])
-        if source_text:
-            return source_field, SOURCE_LABELS[source_field], source_text, f"{case.booking_id}:{source_field}"
-    return None
-
 
 def source_from_evidence_id(evidence_id: str) -> str:
     for source_field in SOURCE_HIERARCHY:

@@ -106,14 +106,16 @@ def test_build_manifest_omits_preview_rows() -> None:
     ]
 
     manifest = build_manifest(
-        approval_date="2026-03-19",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
         raw_rows=5,
         prepared_rows=1,
         categories=categories,
         final_output=final_output,
     )
 
-    assert manifest["approval_date"] == "2026-03-19"
+    assert manifest["start_date"] == "2026-03-19"
+    assert manifest["end_date"] == "2026-03-19"
     assert manifest["raw_rows"] == 5
     assert manifest["prepared_rows"] == 1
     assert manifest["final_output"] == final_output

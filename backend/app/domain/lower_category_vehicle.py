@@ -5,12 +5,8 @@ from typing import Any
 
 import pandas as pd
 
-from backend.app.domain.cab_delay_enrichment import (
-    COMMENTS_COLUMN,
-    booking_comments,
-    first_tracking_row,
-    raw_tracking_value,
-)
+from backend.app.core.tracking_utils import booking_comments, first_tracking_row, raw_tracking_value
+from backend.app.domain.cab_delay_enrichment import COMMENTS_COLUMN
 
 
 VEHICLE_SUBCATEGORY_COLUMN = "vehicle_subcategory"

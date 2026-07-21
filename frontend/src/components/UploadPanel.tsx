@@ -3,21 +3,25 @@ import type { ChangeEvent, DragEvent, FormEvent } from "react";
 
 type UploadPanelProps = {
   selectedFile: File | null;
-  approvalDate: string;
+  startDate: string;
+  endDate: string;
   isProcessing: boolean;
   error: string | null;
   onFileSelect: (file: File | null) => void;
-  onApprovalDateChange: (value: string) => void;
+  onStartDateChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
   onSubmit: () => void;
 };
 
 function UploadPanel({
   selectedFile,
-  approvalDate,
+  startDate,
+  endDate,
   isProcessing,
   error,
   onFileSelect,
-  onApprovalDateChange,
+  onStartDateChange,
+  onEndDateChange,
   onSubmit
 }: UploadPanelProps) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -59,15 +63,28 @@ function UploadPanel({
       </label>
 
       <div className="fieldRow">
-        <label htmlFor="approvalDate">
+        <label htmlFor="startDate">
           <CalendarDays size={18} />
-          <span>Approval date</span>
+          <span>Approval start</span>
         </label>
         <input
-          id="approvalDate"
+          id="startDate"
           type="date"
-          value={approvalDate}
-          onChange={(event) => onApprovalDateChange(event.target.value)}
+          value={startDate}
+          onChange={(event) => onStartDateChange(event.target.value)}
+        />
+      </div>
+
+      <div className="fieldRow">
+        <label htmlFor="endDate">
+          <CalendarDays size={18} />
+          <span>Approval end</span>
+        </label>
+        <input
+          id="endDate"
+          type="date"
+          value={endDate}
+          onChange={(event) => onEndDateChange(event.target.value)}
         />
       </div>
 

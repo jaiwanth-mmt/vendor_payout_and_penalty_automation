@@ -16,7 +16,7 @@ STEP_DEFINITIONS: list[tuple[str, str]] = [
     ("filters_applied", "CARBD and recoverable filters applied"),
     ("duplicates_consolidated", "Duplicate bookings consolidated"),
     ("categories_split", "Subcategories split"),
-    ("tracking_matched", "Tracking JSON matched"),
+    ("tracking_matched", "Live tracking matched"),
     ("categories_processed", "Subcategories processed"),
     ("package_prepared", "ZIP package prepared"),
 ]
@@ -36,7 +36,8 @@ class JobStore:
         *,
         job_id: str,
         original_filename: str,
-        approval_date: str,
+        start_date: str,
+        end_date: str,
         job_dir: Path,
         upload_path: Path,
     ) -> None:
@@ -47,7 +48,8 @@ class JobStore:
                 "status": "queued",
                 "current_step": None,
                 "original_filename": original_filename,
-                "approval_date": approval_date,
+                "start_date": start_date,
+                "end_date": end_date,
                 "created_at": now,
                 "updated_at": now,
                 "job_dir": job_dir,

@@ -145,7 +145,8 @@ class JobResponse(BaseModel):
     status: JobStatus
     current_step: str | None = None
     original_filename: str
-    approval_date: str
+    start_date: str
+    end_date: str
     created_at: str
     updated_at: str
     steps: list[StepState]

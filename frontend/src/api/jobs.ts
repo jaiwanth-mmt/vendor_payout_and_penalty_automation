@@ -96,10 +96,15 @@ export async function fetchAgentCase(jobId: string, bookingId: string): Promise<
   return (await response.json()) as AgentCase;
 }
 
-export async function createJob(file: File, approvalDate: string): Promise<CreateJobResponse> {
+export async function createJob(
+  file: File,
+  startDate: string,
+  endDate: string,
+): Promise<CreateJobResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("approval_date", approvalDate);
+  formData.append("start_date", startDate);
+  formData.append("end_date", endDate);
 
   const response = await fetch(apiUrl("/api/jobs"), {
     method: "POST",

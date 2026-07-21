@@ -11,8 +11,10 @@ function App() {
   const {
     selectedFile,
     setSelectedFile,
-    approvalDate,
-    setApprovalDate,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
     job,
     isProcessing,
     isComplete,
@@ -54,11 +56,13 @@ function App() {
       <section className="workspace">
         <UploadPanel
           selectedFile={selectedFile}
-          approvalDate={approvalDate}
+          startDate={startDate}
+          endDate={endDate}
           isProcessing={isProcessing}
           error={error}
           onFileSelect={handleFileSelect}
-          onApprovalDateChange={setApprovalDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
           onSubmit={submitJob}
         />
         <ProcessingTimeline

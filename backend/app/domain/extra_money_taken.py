@@ -4,11 +4,8 @@ from typing import Any
 
 import pandas as pd
 
-from backend.app.domain.cab_delay_enrichment import (
-    COMMENTS_COLUMN,
-    booking_comments,
-    first_tracking_row,
-)
+from backend.app.core.tracking_utils import booking_comments, first_tracking_row
+from backend.app.domain.cab_delay_enrichment import COMMENTS_COLUMN
 from backend.app.domain.tracking_common import tracking_cell_value
 
 
