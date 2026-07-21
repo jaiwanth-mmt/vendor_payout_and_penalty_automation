@@ -18,15 +18,19 @@ function App() {
     job,
     isProcessing,
     isComplete,
+    isAwaitingReview,
+    showAgentWorkspace,
     hasFailed,
     error,
     setError,
     visibleMetrics,
+    graphEvents,
     submitJob,
     downloadPackage,
     downloadFinalOutput,
     downloadAgentAudit,
-    downloadReviewQueue
+    downloadReviewQueue,
+    refreshJob
   } = usePenaltyJob();
 
   function handleFileSelect(file: File | null) {
@@ -68,6 +72,7 @@ function App() {
         <ProcessingTimeline
           job={job}
           visibleMetrics={visibleMetrics}
+          graphEvents={graphEvents}
           hasFailed={hasFailed}
           onDownload={downloadPackage}
         />
@@ -75,9 +80,11 @@ function App() {
 
       <AgentCockpit
         job={job}
-        isComplete={isComplete}
+        isComplete={showAgentWorkspace}
+        isAwaitingReview={isAwaitingReview}
         onDownloadAgentAudit={downloadAgentAudit}
         onDownloadReviewQueue={downloadReviewQueue}
+        onRefreshJob={refreshJob}
       />
       <FinalOutputPreview job={job} isComplete={isComplete} onDownload={downloadFinalOutput} />
       <CategoryPreview job={job} isComplete={isComplete} />

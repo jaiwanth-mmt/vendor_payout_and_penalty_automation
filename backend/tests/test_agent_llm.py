@@ -833,6 +833,7 @@ def test_agent_progress_reports_completed_warning_and_failed_states() -> None:
         "Evidence Retrieval Agent": "completed",
         "Category Specialist Agents": "completed",
         "Judge Agent": "completed",
+        "Human Review": "completed",
         "Portfolio Summary Agent": "completed",
         "Vendor Penalty Analysis Agent": "completed",
     }
@@ -841,6 +842,7 @@ def test_agent_progress_reports_completed_warning_and_failed_states() -> None:
         "Evidence Retrieval Agent": "warning",
         "Category Specialist Agents": "warning",
         "Judge Agent": "warning",
+        "Human Review": "completed",
         "Portfolio Summary Agent": "warning",
         "Vendor Penalty Analysis Agent": "completed",
     }
@@ -849,6 +851,7 @@ def test_agent_progress_reports_completed_warning_and_failed_states() -> None:
         "Evidence Retrieval Agent": "failed",
         "Category Specialist Agents": "failed",
         "Judge Agent": "failed",
+        "Human Review": "completed",
         "Portfolio Summary Agent": "completed",
         "Vendor Penalty Analysis Agent": "completed",
     }

@@ -260,6 +260,9 @@ async def process_category_batch_async(
     llm_generator: LlmGenerator,
     llm_concurrency: int,
     on_cab_delay_progress: Callable[[dict[str, int], str], None],
+    job_id: str | None = None,
+    enable_hitl: bool = False,
+    on_agent_event=None,
 ) -> CategoryProcessingOutcome:
     base_df = enrich_common_tracking_fields(batch.df, tracking_bookings=tracking_bookings)
     enricher = CATEGORY_ASYNC_ENRICHERS.get(batch.name, _enrich_default_async)
@@ -280,6 +283,9 @@ async def process_category_batch_async(
         tracking_bookings=tracking_bookings,
         llm_generator=llm_generator,
         llm_concurrency=llm_concurrency,
+        job_id=job_id,
+        enable_hitl=enable_hitl,
+        on_event=on_agent_event,
     )
     return CategoryProcessingOutcome(
         enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),

@@ -1,5 +1,5 @@
 export type StepStatus = "pending" | "running" | "completed" | "warning" | "failed";
-export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type JobStatus = "queued" | "running" | "awaiting_review" | "succeeded" | "failed";
 
 export type StepState = {
   id: string;
@@ -63,6 +63,53 @@ export type AgentProgressItem = {
   completed_units: number;
   total_units: number;
   message: string;
+};
+
+export type InvestigationStageProgress = {
+  id: string;
+  label: string;
+  completed_units: number;
+  total_units: number;
+  status: StepStatus;
+};
+
+export type InvestigationSummary = {
+  total_cases: number;
+  cases_seen: number;
+  cases_finalized: number;
+  pending_review: number;
+  status_line: string;
+  stages: InvestigationStageProgress[];
+};
+
+export type GraphEvent = {
+  type: string;
+  node?: string;
+  booking_id?: string;
+  status?: string;
+  summary?: string;
+  tool?: string;
+  thread_id?: string;
+  job_id?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type PendingInterrupt = {
+  booking_id: string;
+  thread_id: string;
+  payload: Record<string, unknown>;
+};
+
+export type GraphTopology = {
+  case: { nodes: string[]; mermaid: string };
+  portfolio: { nodes: string[]; mermaid: string };
+};
+
+export type ToolCallRecord = {
+  name: string;
+  status: string;
+  summary: string;
+  result?: Record<string, unknown>;
 };
 
 export type AgentSummary = {
@@ -155,6 +202,8 @@ export type AgentCase = {
   review_status: string;
   evidence: EvidenceItem[];
   trace: AgentTraceStep[];
+  tool_calls?: ToolCallRecord[];
+  pending_interrupt?: boolean;
   specialist_decision: AgentDecision | null;
   judge_decision: AgentDecision | null;
   final_decision: AgentDecision | null;
@@ -225,6 +274,10 @@ export type JobResponse = {
   agent_summary: AgentSummary | null;
   case_counts: Record<string, number>;
   agent_progress: AgentProgressItem[];
+  investigation_summary: InvestigationSummary | null;
+  graph_events: GraphEvent[];
+  pending_interrupts: PendingInterrupt[];
+  graph_topology: GraphTopology | null;
   download_ready: boolean;
   error: string | null;
 };
@@ -238,4 +291,13 @@ export type VisibleMetric = {
   key: string;
   label: string;
   value: number | string;
+};
+
+export type ResumeCaseRequest = {
+  decision: string;
+  review_status: string;
+  recommended_recovery_amount?: number;
+  review_reason?: string;
+  rationale?: string;
+  recommended_action?: string;
 };

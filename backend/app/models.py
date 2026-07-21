@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 StepStatus = Literal["pending", "running", "completed", "warning", "failed"]
-JobStatus = Literal["queued", "running", "succeeded", "failed"]
+JobStatus = Literal["queued", "running", "awaiting_review", "succeeded", "failed"]
 
 
 class StepState(BaseModel):
@@ -97,6 +97,55 @@ class AgentProgressItem(BaseModel):
     message: str = ""
 
 
+class InvestigationStageProgress(BaseModel):
+    id: str
+    label: str
+    completed_units: int = 0
+    total_units: int = 0
+    status: StepStatus = "pending"
+
+
+class InvestigationSummary(BaseModel):
+    total_cases: int = 0
+    cases_seen: int = 0
+    cases_finalized: int = 0
+    pending_review: int = 0
+    status_line: str = ""
+    stages: list[InvestigationStageProgress] = Field(default_factory=list)
+
+
+class GraphEvent(BaseModel):
+    type: str = ""
+    node: str = ""
+    booking_id: str = ""
+    status: str = ""
+    summary: str = ""
+    tool: str | None = None
+    thread_id: str | None = None
+    job_id: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PendingInterrupt(BaseModel):
+    booking_id: str
+    thread_id: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphTopologyResponse(BaseModel):
+    case: dict[str, Any] = Field(default_factory=dict)
+    portfolio: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResumeCaseRequest(BaseModel):
+    decision: str = "needs_review"
+    review_status: str = "needs_review"
+    recommended_recovery_amount: float | None = None
+    review_reason: str = ""
+    rationale: str = ""
+    recommended_action: str = ""
+
+
 class AgentSummary(BaseModel):
     executive_summary: str = ""
     case_counts: dict[str, int] = Field(default_factory=dict)
@@ -158,6 +207,10 @@ class JobResponse(BaseModel):
     agent_summary: AgentSummary | None = None
     case_counts: dict[str, int] = Field(default_factory=dict)
     agent_progress: list[AgentProgressItem] = Field(default_factory=list)
+    investigation_summary: InvestigationSummary | None = None
+    graph_events: list[dict[str, Any]] = Field(default_factory=list)
+    pending_interrupts: list[PendingInterrupt] = Field(default_factory=list)
+    graph_topology: dict[str, Any] | None = None
     download_ready: bool = False
     error: str | None = None
 

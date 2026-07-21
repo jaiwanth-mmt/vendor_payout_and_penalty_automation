@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { apiUrl, createJob, fetchJob } from "../api/jobs";
+import { apiUrl, createJob, fetchJob, openJobEventStream } from "../api/jobs";
 import { DEFAULT_END_DATE, DEFAULT_START_DATE, METRIC_LABELS } from "../constants/pipeline";
-import type { JobResponse, VisibleMetric } from "../types/jobs";
+import type { GraphEvent, JobResponse, VisibleMetric } from "../types/jobs";
 
 function formatMetricValue(key: string, value: number | string): number | string {
   const numberValue = Number(value);
@@ -22,6 +22,11 @@ function isTerminalJob(job: JobResponse): boolean {
   return job.status === "succeeded" || job.status === "failed";
 }
 
+function shouldStreamEvents(job: JobResponse | null): boolean {
+  if (!job) return true;
+  return job.status === "queued" || job.status === "running" || job.status === "awaiting_review";
+}
+
 export function usePenaltyJob() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
@@ -30,26 +35,39 @@ export function usePenaltyJob() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [graphEvents, setGraphEvents] = useState<GraphEvent[]>([]);
+  const pendingEventsRef = useRef<GraphEvent[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
 
   const isProcessing = job?.status === "queued" || job?.status === "running" || isSubmitting;
+  const isAwaitingReview = job?.status === "awaiting_review";
   const isComplete = job?.status === "succeeded";
   const hasFailed = job?.status === "failed";
+  const showAgentWorkspace = isComplete || isAwaitingReview;
 
   const fetchJobStatus = useCallback(async (id: string) => {
     const payload = await fetchJob(id);
     setJob(payload);
+    // Prefer polled investigation_summary; only seed technical log from snapshot when empty.
+    if (payload.graph_events?.length) {
+      setGraphEvents((current) => (current.length ? current : payload.graph_events));
+    }
     return payload;
   }, []);
 
   useEffect(() => {
     if (!jobId) return;
-    if (job?.status === "succeeded" || job?.status === "failed") return;
+    // Keep polling through awaiting_review so Approve / Keep review updates the timeline.
+    if (job && isTerminalJob(job)) return;
 
     let isCancelled = false;
     const poll = async () => {
       try {
         const payload = await fetchJobStatus(jobId);
         if (!isCancelled && isTerminalJob(payload)) {
+          setIsSubmitting(false);
+        }
+        if (!isCancelled && payload.status === "awaiting_review") {
           setIsSubmitting(false);
         }
       } catch (pollError) {
@@ -67,6 +85,39 @@ export function usePenaltyJob() {
       window.clearInterval(timer);
     };
   }, [fetchJobStatus, job?.status, jobId]);
+
+  useEffect(() => {
+    if (!jobId || !shouldStreamEvents(job)) return;
+
+    const source = openJobEventStream(jobId);
+    source.onmessage = (message) => {
+      try {
+        const event = JSON.parse(message.data) as GraphEvent;
+        // Buffer SSE ticks and flush at most ~1/sec so the technical log stays readable.
+        pendingEventsRef.current = [...pendingEventsRef.current.slice(-39), event];
+        if (flushTimerRef.current != null) return;
+        flushTimerRef.current = window.setTimeout(() => {
+          const batch = pendingEventsRef.current;
+          pendingEventsRef.current = [];
+          flushTimerRef.current = null;
+          if (!batch.length) return;
+          setGraphEvents((current) => [...current, ...batch].slice(-40));
+        }, 1000);
+      } catch {
+        // ignore malformed SSE payloads
+      }
+    };
+    source.onerror = () => {
+      source.close();
+    };
+    return () => {
+      source.close();
+      if (flushTimerRef.current != null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+    };
+  }, [job, jobId]);
 
   const visibleMetrics = useMemo<VisibleMetric[]>(() => {
     if (!job?.metrics) return [];
@@ -98,12 +149,14 @@ export function usePenaltyJob() {
     setError(null);
     setJob(null);
     setJobId(null);
+    setGraphEvents([]);
+    pendingEventsRef.current = [];
 
     try {
       const payload = await createJob(selectedFile, startDate, endDate);
       setJobId(payload.job_id);
       const initialJob = await fetchJobStatus(payload.job_id);
-      if (isTerminalJob(initialJob)) {
+      if (isTerminalJob(initialJob) || initialJob.status === "awaiting_review") {
         setIsSubmitting(false);
       }
     } catch (submitError) {
@@ -132,6 +185,11 @@ export function usePenaltyJob() {
     window.location.href = apiUrl(`/api/jobs/${job.job_id}/review-queue/download`);
   }, [job]);
 
+  const refreshJob = useCallback(async () => {
+    if (!jobId) return;
+    await fetchJobStatus(jobId);
+  }, [fetchJobStatus, jobId]);
+
   return {
     selectedFile,
     setSelectedFile,
@@ -141,15 +199,19 @@ export function usePenaltyJob() {
     setEndDate,
     job,
     isProcessing,
+    isAwaitingReview,
     isComplete,
+    showAgentWorkspace,
     hasFailed,
     error,
     setError,
     visibleMetrics,
+    graphEvents,
     submitJob,
     downloadPackage,
     downloadFinalOutput,
     downloadAgentAudit,
-    downloadReviewQueue
+    downloadReviewQueue,
+    refreshJob
   };
 }

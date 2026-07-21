@@ -38,6 +38,9 @@ function FinalOutputPreview({ job, isComplete, onDownload }: FinalOutputPreviewP
   const statusText = useMemo(() => {
     if (!job) return "Run a workbook to generate the combined file";
     if (job.status === "failed") return "Final output was not generated";
+    if (job.status === "awaiting_review") {
+      return "Final XLSX packages after all human reviews are resolved";
+    }
     if (!isComplete) return "Final output will appear after processing";
     if (activeSearch) return `${rowCount.toLocaleString()} rows matching ${activeSearch}`;
     return `${rowCount.toLocaleString()} rows across ${columns.length} columns`;
