@@ -321,6 +321,10 @@ def join_categories(value: Any) -> str:
 def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
     case_counts = build_case_counts(cases)
     total_recoverable = sum(float(case.get("recoverable_amount") or 0) for case in cases)
+    high_confidence_case_count = count_cases(
+        cases,
+        lambda case: (case.get("final_decision") or {}).get("confidence", 0) >= 0.85,
+    )
     high_confidence_recoverable = sum(
         float(case.get("recoverable_amount") or 0)
         for case in cases
@@ -363,6 +367,7 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "case_counts": case_counts,
         "total_recoverable_amount": round(total_recoverable, 2),
+        "high_confidence_case_count": high_confidence_case_count,
         "high_confidence_recoverable_amount": round(high_confidence_recoverable, 2),
         "top_complaint_drivers": top_complaint_drivers,
         "category_breakdown": [

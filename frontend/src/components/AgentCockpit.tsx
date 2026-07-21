@@ -3,14 +3,11 @@ import {
   BarChart3,
   Bot,
   Building2,
-  CheckCircle2,
   ClipboardList,
   Download,
-  FileSearch,
   LoaderCircle,
   ShieldCheck,
   Sparkles,
-  XCircle
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -24,7 +21,6 @@ import type {
   JobResponse,
   ReviewQueueItem,
   SourceAnalysis,
-  StepStatus,
   VendorSubcategorySummary,
 } from "../types/jobs";
 import BookingSearchForm from "./BookingSearchForm";
@@ -78,7 +74,6 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
   const [activeBookingId, setActiveBookingId] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
-  const [progressPage, setProgressPage] = useState(1);
   const [actionPage, setActionPage] = useState(1);
   const [isCasePageLoading, setIsCasePageLoading] = useState(false);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
@@ -98,7 +93,6 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
     setActiveBookingId(null);
     setSearchInput("");
     setActiveSearch("");
-    setProgressPage(1);
     setActionPage(1);
     setError(null);
   }, [job?.job_id]);
@@ -191,8 +185,6 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
 
   const summary = job?.agent_summary;
   const counts = job?.case_counts ?? {};
-  const progressItems = job?.agent_progress ?? [];
-  const pagedProgressItems = paginateLocal(progressItems, progressPage);
   const recommendedActions = summary?.recommended_actions ?? [];
   const pagedActions = paginateLocal(recommendedActions, actionPage);
 
@@ -277,7 +269,6 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
           <Bot size={22} />
           <div>
             <h2>Agentic Loss Recovery Copilot</h2>
-            <p>{summary?.executive_summary ?? "Investigation summary appears after processing"}</p>
           </div>
         </div>
         <div className="agentActions">
@@ -316,41 +307,6 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
       </div>
 
       <div className="agentGrid">
-        <div className="agentPanel">
-          <div className="agentPanelHeader">
-            <span>Agent run</span>
-            <strong>{progressItems.length}</strong>
-          </div>
-          <div className="agentProgressList">
-            {pagedProgressItems.map((item) => (
-              <div className="agentProgressItem" data-status={item.status} key={item.agent}>
-                <AgentProgressIcon status={item.status} />
-                <div>
-                  <span>{item.agent}</span>
-                  <p>{item.message}</p>
-                </div>
-              </div>
-            ))}
-            {!progressItems.length && (
-              <div className="agentEmpty">
-                <FileSearch size={24} />
-                <span>Agent trace will appear here</span>
-              </div>
-            )}
-          </div>
-          {progressItems.length > AGENT_PAGE_SIZE && (
-            <PaginationControls
-              label="Agent run pagination"
-              page={progressPage}
-              totalPages={pageCount(progressItems.length)}
-              itemCount={progressItems.length}
-              pageSize={AGENT_PAGE_SIZE}
-              noun="steps"
-              onPageChange={setProgressPage}
-            />
-          )}
-        </div>
-
         <div className="agentPanel">
           <div className="agentPanelHeader">
             <span>Review queue</span>
@@ -501,13 +457,24 @@ function VendorPenaltySummary({ summary, isComplete }: { summary: AgentSummary |
           <BarChart3 size={16} />
         </div>
         <div className="vendorMixList">
-          {topVendors.map((vendor) => (
-            <div className="vendorMixBlock" key={vendor.vendor_name}>
-              <div>
+          {topVendors.slice(0, 3).map((vendor) => (
+            <div className="vendorMixCard" key={vendor.vendor_name}>
+              <div className="vendorMixCardHeader">
                 <span>{vendor.vendor_name}</span>
-                <em>{formatAmount(vendor.total_recoverable)}</em>
+                <strong>{formatAmount(vendor.total_recoverable)}</strong>
               </div>
-              <SubcategorySummaryList items={vendor.top_subcategories} />
+              <div className="vendorMixRows">
+                {vendor.top_subcategories.slice(0, 3).map((item, index) => (
+                  <div className="vendorMixRow" key={item.subcategory}>
+                    <span title={item.subcategory}>
+                      {index + 1}. {item.subcategory}
+                    </span>
+                    <em>{item.case_count} cases</em>
+                    <strong>{formatAmount(item.total_recoverable)}</strong>
+                  </div>
+                ))}
+                {!vendor.top_subcategories.length && <p className="vendorMutedText">No subcategories</p>}
+              </div>
             </div>
           ))}
         </div>
@@ -543,12 +510,6 @@ function SubcategorySummaryList({ items }: { items: VendorSubcategorySummary[] }
       ))}
     </div>
   );
-}
-
-function AgentProgressIcon({ status }: { status: StepStatus }) {
-  if (status === "failed") return <XCircle size={17} />;
-  if (status === "warning") return <AlertTriangle size={17} />;
-  return <CheckCircle2 size={17} />;
 }
 
 function KpiCard({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) {

@@ -138,6 +138,8 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert payload["metrics"]["final_output_rows"] == 1
         assert payload["case_counts"]["total_cases"] == 1
         assert payload["agent_summary"]["case_counts"]["total_cases"] == 1
+        assert payload["agent_summary"]["high_confidence_case_count"] == 1
+        assert payload["metrics"]["agent_high_confidence_cases"] == 1
         assert payload["agent_summary"]["top_vendors_by_penalty"] == [
             {
                 "vendor_name": "savaari",

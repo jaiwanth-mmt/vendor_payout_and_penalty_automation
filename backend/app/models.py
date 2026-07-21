@@ -101,6 +101,7 @@ class AgentSummary(BaseModel):
     executive_summary: str = ""
     case_counts: dict[str, int] = Field(default_factory=dict)
     total_recoverable_amount: float = 0
+    high_confidence_case_count: int = 0
     high_confidence_recoverable_amount: float = 0
     top_complaint_drivers: list[str] = Field(default_factory=list)
     category_breakdown: list[dict[str, Any]] = Field(default_factory=list)

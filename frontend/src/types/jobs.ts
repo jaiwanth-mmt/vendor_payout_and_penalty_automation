@@ -69,6 +69,7 @@ export type AgentSummary = {
   executive_summary: string;
   case_counts: Record<string, number>;
   total_recoverable_amount: number;
+  high_confidence_case_count: number;
   high_confidence_recoverable_amount: number;
   top_complaint_drivers: string[];
   category_breakdown: Array<Record<string, string | number>>;

@@ -309,6 +309,7 @@ def validate_portfolio_payload(payload: dict[str, Any], fallback_summary: dict[s
 
     output["case_counts"] = fallback_summary.get("case_counts", {})
     output["total_recoverable_amount"] = fallback_summary.get("total_recoverable_amount", 0)
+    output["high_confidence_case_count"] = fallback_summary.get("high_confidence_case_count", 0)
     output["high_confidence_recoverable_amount"] = fallback_summary.get("high_confidence_recoverable_amount", 0)
     return output
 

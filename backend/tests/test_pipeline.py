@@ -73,6 +73,8 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert package_path.exists()
     assert result.case_counts["total_cases"] == 1
     assert result.agent_summary["case_counts"]["total_cases"] == 1
+    assert result.agent_summary["high_confidence_case_count"] == 1
+    assert result.metrics["agent_high_confidence_cases"] == 1
     assert result.agent_summary["top_vendors_by_penalty"] == [
         {
             "vendor_name": "savaari",

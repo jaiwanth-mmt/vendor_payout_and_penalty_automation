@@ -437,6 +437,7 @@ async def process_uploaded_workbook_async(
         "agent_contradiction_cases": case_counts["contradiction"],
         "agent_failed_cases": case_counts["failed"],
         "agent_total_recoverable_amount": agent_summary["total_recoverable_amount"],
+        "agent_high_confidence_cases": agent_summary["high_confidence_case_count"],
         "agent_high_confidence_recoverable_amount": agent_summary["high_confidence_recoverable_amount"],
     }
     return PipelineResult(
