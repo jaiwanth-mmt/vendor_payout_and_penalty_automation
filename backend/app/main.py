@@ -10,24 +10,37 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import load_workbook
 
 from backend.app.core.env import load_env_file
 from backend.app.core.paths import DEFAULT_END_DATE, DEFAULT_START_DATE, JOB_RUNTIME_ROOT, REPO_ROOT
 from backend.app.agents.orchestrator import review_queue_row
+from backend.app.agents.runner import (
+    get_graph_topology,
+    get_job_events,
+    get_pending_interrupts,
+    resume_case,
+)
 from backend.app.integrations.tracking import live_tracking_repository_from_env
 from backend.app.models import (
     AgentCasesPageResponse,
     CategoryPreviewResponse,
     CreateJobResponse,
     FinalOutputPreviewResponse,
+    GraphTopologyResponse,
     JobResponse,
+    PendingInterrupt,
+    ResumeCaseRequest,
     ReviewQueuePageResponse,
 )
 from backend.app.services.job_store import JobStore
 from backend.app.services.package_builder import PACKAGE_FILENAME
-from backend.app.services.pipeline import process_uploaded_workbook_async
+from backend.app.services.pipeline import package_after_hitl, process_uploaded_workbook_async
+import asyncio
+import json
+from backend.app.agents.portfolio import build_case_counts
+from backend.app.agents.runner import build_agent_progress
 
 
 RUNTIME_DIR = JOB_RUNTIME_ROOT
@@ -234,7 +247,7 @@ def list_review_queue(job_id: str, page: int = Query(1, ge=1)) -> ReviewQueuePag
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status != "succeeded":
+    if snapshot.status not in {"succeeded", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Review queue is not ready yet")
 
     items = [review_queue_row(case) for case in cases if case.get("review_status") != "auto_ready"]
@@ -256,7 +269,7 @@ def list_agent_cases(job_id: str, page: int = Query(1, ge=1)) -> AgentCasesPageR
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status != "succeeded":
+    if snapshot.status not in {"succeeded", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
 
     page_cases, safe_page, total_pages = paginate_items(cases, page=page, page_size=AGENT_PAGE_SIZE)
@@ -277,7 +290,7 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status != "succeeded":
+    if snapshot.status not in {"succeeded", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
 
     for case in cases:
@@ -287,6 +300,164 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Agent case not found")
 
 
+@app.get("/api/jobs/{job_id}/graph", response_model=GraphTopologyResponse)
+def get_job_graph(job_id: str) -> GraphTopologyResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+    topology = snapshot.graph_topology or get_graph_topology(job_id)
+    return GraphTopologyResponse(**topology)
+
+
+@app.get("/api/jobs/{job_id}/interrupts")
+def list_job_interrupts(job_id: str) -> list[PendingInterrupt]:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+    return snapshot.pending_interrupts
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def stream_job_events(job_id: str, after: int = Query(0, ge=0)) -> StreamingResponse:
+    try:
+        job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    async def event_generator() -> AsyncIterator[str]:
+        cursor = after
+        idle_rounds = 0
+        while True:
+            try:
+                snapshot = job_store.snapshot(job_id)
+            except KeyError:
+                yield f"event: error\ndata: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
+
+            store_events = list(snapshot.graph_events or [])
+            runner_events = get_job_events(job_id, after_index=0)
+            # Prefer job_store buffer; fall back to runner registry.
+            events = store_events if store_events else runner_events
+            if cursor < len(events):
+                for event in events[cursor:]:
+                    yield f"data: {json.dumps(event)}\n\n"
+                cursor = len(events)
+                idle_rounds = 0
+            else:
+                idle_rounds += 1
+                yield f": keepalive {idle_rounds}\n\n"
+
+            if snapshot.status in {"succeeded", "failed"} and idle_rounds > 2:
+                yield f"event: done\ndata: {json.dumps({'status': snapshot.status})}\n\n"
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/api/jobs/{job_id}/cases/{booking_id}/resume")
+async def resume_job_case(job_id: str, booking_id: str, body: ResumeCaseRequest) -> dict[str, Any]:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status not in {"awaiting_review", "running"}:
+        raise HTTPException(status_code=409, detail="Job is not awaiting human review")
+
+    human_decision = {
+        "decision": body.decision,
+        "review_status": body.review_status,
+        "review_reason": body.review_reason,
+        "rationale": body.rationale,
+        "recommended_action": body.recommended_action,
+    }
+    if body.recommended_recovery_amount is not None:
+        human_decision["recommended_recovery_amount"] = body.recommended_recovery_amount
+
+    try:
+        payload = await resume_case(
+            job_id=job_id,
+            booking_id=booking_id,
+            human_decision=human_decision,
+            on_event=lambda event: job_store.append_graph_event(job_id, event),
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    cases = job_store.get_agent_cases(job_id)
+    updated_cases = []
+    replaced = False
+    for case in cases:
+        if str(case.get("booking_id", "")).strip() == booking_id:
+            updated_cases.append(payload)
+            replaced = True
+        else:
+            updated_cases.append(case)
+    if not replaced:
+        updated_cases.append(payload)
+    job_store.update_agent_cases(job_id, updated_cases)
+
+    pending = get_pending_interrupts(job_id)
+    job_store.set_pending_interrupts(job_id, pending)
+    case_counts = build_case_counts(updated_cases)
+    agent_progress = build_agent_progress(updated_cases)
+    with job_store._lock:
+        job = job_store._jobs[job_id]
+        job["case_counts"] = case_counts
+        job["agent_progress"] = agent_progress
+        from backend.app.services.job_store import utc_now
+
+        job["updated_at"] = utc_now()
+
+    if not pending:
+        try:
+            await _complete_job_after_hitl(job_id, updated_cases)
+        except Exception as error:
+            job_store.fail_job(job_id, f"Packaging after human review failed: {error}")
+            raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return payload
+
+
+async def _complete_job_after_hitl(job_id: str, agent_cases: list[dict[str, Any]]) -> None:
+    """Build portfolio + package artifacts when packaging was deferred for human review."""
+    job = job_store._jobs[job_id]
+    job_dir = Path(job["job_dir"])
+    job_store.mark_step_running(job_id, "package_prepared", "Packaging after human review")
+    packaged = await package_after_hitl(
+        job_dir=job_dir,
+        output_package_path=job_dir / PACKAGE_FILENAME,
+        start_date=str(job.get("start_date") or ""),
+        end_date=str(job.get("end_date") or ""),
+        category_outputs=list(job.get("category_outputs") or []),
+        agent_cases=agent_cases,
+        metrics=dict(job.get("metrics") or {}),
+        job_id=job_id,
+        on_event=lambda event: job_store.append_graph_event(job_id, event),
+    )
+    job_store.mark_step_completed(job_id, "agent_investigation", "LangGraph investigation completed")
+    job_store.mark_step_completed(job_id, "package_prepared", "ZIP package ready after human review")
+    job_store.complete_job(
+        job_id,
+        metrics=packaged["metrics"],
+        category_outputs=packaged["category_outputs"],
+        package_path=packaged["package_path"],
+        final_output_path=packaged["final_output_path"],
+        final_output=packaged["final_output"],
+        agent_audit_path=packaged["agent_audit_path"],
+        review_queue_path=packaged["review_queue_path"],
+        agent_summary_path=packaged["agent_summary_path"],
+        agent_summary=packaged["agent_summary"],
+        case_counts=packaged["case_counts"],
+        agent_progress=packaged["agent_progress"],
+        agent_cases=packaged["agent_cases"],
+    )
+    job_store.set_pending_interrupts(job_id, [])
+
+
 async def run_processing_job(
     job_id: str,
     upload_path: Path,
@@ -294,7 +465,14 @@ async def run_processing_job(
     end_date: str,
     job_dir: Path,
 ) -> None:
+    def _init_category_and_investigation(categories: list[dict[str, Any]]) -> None:
+        job_store.initialize_category_progress(job_id, categories)
+        total_cases = sum(int(category.get("row_count") or 0) for category in categories)
+        job_store.init_investigation_progress(job_id, total_cases=total_cases)
+
     try:
+        job_store.mark_step_running(job_id, "agent_investigation", "LangGraph investigation pending category processing")
+        job_store.set_graph_topology(job_id, get_graph_topology(job_id))
         tracking_repository = live_tracking_repository_from_env()
         result = await process_uploaded_workbook_async(
             input_path=upload_path,
@@ -312,12 +490,26 @@ async def run_processing_job(
                 total_units=total_units,
                 message=message,
             ),
-            on_category_progress_initialized=lambda categories: job_store.initialize_category_progress(
-                job_id,
-                categories,
-            ),
+            on_category_progress_initialized=_init_category_and_investigation,
             on_category_progress=lambda slug, update: job_store.update_category_progress(job_id, slug, **update),
+            job_id=job_id,
+            enable_hitl=True,
+            on_agent_event=lambda event: job_store.append_graph_event(job_id, event),
         )
+        job_store.set_graph_topology(job_id, get_graph_topology(job_id))
+        if result.awaiting_review:
+            job_store.mark_awaiting_review(
+                job_id,
+                metrics=result.metrics,
+                category_outputs=result.category_outputs,
+                case_counts=result.case_counts,
+                agent_progress=result.agent_progress,
+                agent_cases=result.agent_cases,
+                pending_interrupts=result.pending_interrupts or get_pending_interrupts(job_id),
+            )
+            return
+
+        job_store.mark_step_completed(job_id, "agent_investigation", "LangGraph investigation completed")
         job_store.complete_job(
             job_id,
             metrics=result.metrics,
@@ -333,6 +525,7 @@ async def run_processing_job(
             agent_progress=result.agent_progress,
             agent_cases=result.agent_cases,
         )
+        job_store.set_pending_interrupts(job_id, [])
     except Exception as error:
         job_store.fail_job(job_id, str(error))
 
@@ -391,7 +584,12 @@ def read_workbook_rows_page(
     page_size: int,
     booking_id: str | None = None,
 ) -> dict[str, Any]:
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    if not path.exists() or path.stat().st_size == 0:
+        raise HTTPException(status_code=404, detail="Final output workbook is not ready")
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+    except Exception as error:
+        raise HTTPException(status_code=404, detail="Final output workbook is not readable") from error
     try:
         worksheet = workbook.active
         worksheet_rows = worksheet.iter_rows(values_only=True)

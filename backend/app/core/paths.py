@@ -9,6 +9,7 @@ DATA_ROOT = REPO_ROOT / "data"
 DEMO_DATA_ROOT = DATA_ROOT / "demo"
 RUNTIME_ROOT = BACKEND_ROOT / ".runtime"
 JOB_RUNTIME_ROOT = RUNTIME_ROOT / "jobs"
+LANGGRAPH_RUNTIME_ROOT = RUNTIME_ROOT / "langgraph"
 
 DEMO_WORKBOOK_PATH = DEMO_DATA_ROOT / "qliksense_dump.xlsx"
 DEMO_TRACKING_JSON_PATH = DEMO_DATA_ROOT / "tracking_reports_by_booking.json"

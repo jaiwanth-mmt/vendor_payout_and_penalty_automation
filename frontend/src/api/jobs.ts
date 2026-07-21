@@ -4,7 +4,10 @@ import type {
   CategoryPreviewResponse,
   CreateJobResponse,
   FinalOutputPreviewResponse,
+  GraphTopology,
   JobResponse,
+  PendingInterrupt,
+  ResumeCaseRequest,
   ReviewQueuePageResponse
 } from "../types/jobs";
 
@@ -94,6 +97,43 @@ export async function fetchAgentCase(jobId: string, bookingId: string): Promise<
     throw new Error(payload.detail ?? "Unable to fetch agent case");
   }
   return (await response.json()) as AgentCase;
+}
+
+export async function fetchGraphTopology(jobId: string): Promise<GraphTopology> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/graph`));
+  if (!response.ok) {
+    throw new Error("Unable to fetch LangGraph topology");
+  }
+  return (await response.json()) as GraphTopology;
+}
+
+export async function fetchPendingInterrupts(jobId: string): Promise<PendingInterrupt[]> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/interrupts`));
+  if (!response.ok) {
+    throw new Error("Unable to fetch pending interrupts");
+  }
+  return (await response.json()) as PendingInterrupt[];
+}
+
+export async function resumeAgentCase(
+  jobId: string,
+  bookingId: string,
+  body: ResumeCaseRequest
+): Promise<AgentCase> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/cases/${encodeURIComponent(bookingId)}/resume`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to resume case");
+  }
+  return (await response.json()) as AgentCase;
+}
+
+export function openJobEventStream(jobId: string): EventSource {
+  return new EventSource(apiUrl(`/api/jobs/${jobId}/events`));
 }
 
 export async function createJob(

@@ -12,25 +12,32 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
-import { fetchAgentCase, fetchAgentCases, fetchReviewQueue } from "../api/jobs";
+import { fetchAgentCase, fetchAgentCases, fetchGraphTopology, fetchReviewQueue, resumeAgentCase } from "../api/jobs";
 import type {
   AgentCase,
+  AgentDecision,
   AgentSummary,
   AgentTraceStep,
   EvidenceItem,
+  GraphTopology,
   JobResponse,
+  PendingInterrupt,
   ReviewQueueItem,
   SourceAnalysis,
+  ToolCallRecord,
   VendorSubcategorySummary,
 } from "../types/jobs";
 import BookingSearchForm from "./BookingSearchForm";
+import MermaidDiagram from "./MermaidDiagram";
 import PaginationControls from "./PaginationControls";
 
 type AgentCockpitProps = {
   job: JobResponse | null;
   isComplete: boolean;
+  isAwaitingReview?: boolean;
   onDownloadAgentAudit: () => void;
   onDownloadReviewQueue: () => void;
+  onRefreshJob?: () => Promise<void> | void;
 };
 
 const AGENT_PAGE_SIZE = 5;
@@ -61,7 +68,14 @@ function paginateLocal<T>(items: T[], page: number): T[] {
   return items.slice(startIndex, startIndex + AGENT_PAGE_SIZE);
 }
 
-function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQueue }: AgentCockpitProps) {
+function AgentCockpit({
+  job,
+  isComplete,
+  isAwaitingReview = false,
+  onDownloadAgentAudit,
+  onDownloadReviewQueue,
+  onRefreshJob,
+}: AgentCockpitProps) {
   const [casePage, setCasePage] = useState(1);
   const [casePageItems, setCasePageItems] = useState<AgentCase[]>([]);
   const [caseCount, setCaseCount] = useState(0);
@@ -79,6 +93,10 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
   const [isReviewLoading, setIsReviewLoading] = useState(false);
   const [isCaseDetailLoading, setIsCaseDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [topology, setTopology] = useState<GraphTopology | null>(null);
+  const [resumeBusy, setResumeBusy] = useState<string | null>(null);
+
+  const pendingInterrupts = job?.pending_interrupts ?? [];
 
   useEffect(() => {
     setCasePage(1);
@@ -95,7 +113,60 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
     setActiveSearch("");
     setActionPage(1);
     setError(null);
+    setTopology(null);
   }, [job?.job_id]);
+
+  useEffect(() => {
+    if (!isComplete || !job?.job_id) return;
+    let cancelled = false;
+    fetchGraphTopology(job.job_id)
+      .then((payload) => {
+        if (!cancelled) setTopology(payload);
+      })
+      .catch(() => {
+        if (!cancelled && job.graph_topology) setTopology(job.graph_topology as GraphTopology);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isComplete, job?.job_id]);
+
+  async function handleResume(interrupt: PendingInterrupt, approve: boolean) {
+    if (!job?.job_id) return;
+    setResumeBusy(interrupt.booking_id);
+    setError(null);
+    try {
+      const amount = Number(
+        (interrupt.payload as { recoverable_amount?: number }).recoverable_amount ??
+          (interrupt.payload as { judge_decision?: { recommended_recovery_amount?: number } }).judge_decision
+            ?.recommended_recovery_amount ??
+          0
+      );
+      await resumeAgentCase(job.job_id, interrupt.booking_id, {
+        decision: approve ? "valid_penalty" : "needs_review",
+        review_status: approve ? "auto_ready" : "needs_review",
+        recommended_recovery_amount: approve ? amount : 0,
+        review_reason: approve ? "Approved via LangGraph human review" : "Kept in review via LangGraph HITL",
+        recommended_action: approve ? "Ready for Cab Ops recovery package" : "Review before operational action",
+      });
+      await onRefreshJob?.();
+      // Reload review queue / cases after each resume so counts stay current during HITL.
+      if (job.job_id) {
+        try {
+          const reviewPayload = await fetchReviewQueue(job.job_id, reviewPage);
+          setReviewItems(reviewPayload.items);
+          setReviewItemCount(reviewPayload.item_count);
+          setReviewTotalPages(reviewPayload.total_pages);
+        } catch {
+          // refreshJob already updated snapshot; ignore secondary reload errors
+        }
+      }
+    } catch (resumeError) {
+      setError(resumeError instanceof Error ? resumeError.message : "Resume failed");
+    } finally {
+      setResumeBusy(null);
+    }
+  }
 
   useEffect(() => {
     if (!isComplete || !job?.job_id) {
@@ -294,6 +365,67 @@ function AgentCockpit({ job, isComplete, onDownloadAgentAudit, onDownloadReviewQ
       </div>
 
       <VendorPenaltySummary summary={summary} isComplete={isComplete} />
+
+      {(isAwaitingReview || pendingInterrupts.length > 0) && (
+        <div className="agentPanel hitlPanel">
+          <div className="agentPanelHeader">
+            <span>LangGraph human review</span>
+            <strong>{pendingInterrupts.length}</strong>
+          </div>
+          <div className="reviewQueueList">
+            {pendingInterrupts.map((item) => (
+              <div className="hitlRow" key={item.booking_id}>
+                <div>
+                  <strong>{item.booking_id}</strong>
+                  <p>{String((item.payload as { review_reason?: string }).review_reason || "Awaiting review")}</p>
+                </div>
+                <div className="hitlActions">
+                  <button
+                    className="ghostButton"
+                    type="button"
+                    disabled={resumeBusy === item.booking_id}
+                    onClick={() => handleResume(item, true)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="ghostButton"
+                    type="button"
+                    disabled={resumeBusy === item.booking_id}
+                    onClick={() => handleResume(item, false)}
+                  >
+                    Keep review
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!pendingInterrupts.length && (
+              <div className="agentEmpty">
+                <ShieldCheck size={24} />
+                <span>No pending interrupts</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {topology?.case?.mermaid && (
+        <div className="agentPanel graphTopologyPanel">
+          <div className="agentPanelHeader">
+            <span>Case investigation graph</span>
+            <strong>{topology.case.nodes?.length ?? 0} nodes</strong>
+          </div>
+          <MermaidDiagram chart={topology.case.mermaid} className="mermaidDiagram" />
+          {topology.portfolio?.mermaid && (
+            <>
+              <div className="agentPanelHeader">
+                <span>Portfolio graph</span>
+              </div>
+              <MermaidDiagram chart={topology.portfolio.mermaid} className="mermaidDiagram" />
+            </>
+          )}
+        </div>
+      )}
 
       <div className="agentKpiGrid">
         <KpiCard icon={<ShieldCheck size={18} />} label="Auto-ready" value={counts.auto_ready ?? 0} />
@@ -580,8 +712,11 @@ function CaseDrawer({
   if (!activeCase && !isCasePageLoading) return null;
 
   const decision = activeCase?.final_decision;
+  const specialist = activeCase?.specialist_decision;
+  const judge = activeCase?.judge_decision;
   const evidence = activeCase?.evidence ?? [];
   const trace = activeCase?.trace ?? [];
+  const toolCalls = activeCase?.tool_calls ?? [];
   const pagedEvidence = paginateLocal(evidence, evidencePage);
   const pagedTrace = paginateLocal(trace, tracePage);
 
@@ -638,6 +773,15 @@ function CaseDrawer({
                 )}
                 <p>{decision?.rationale}</p>
                 <SourceComparison analysis={activeCase.source_analysis} />
+                <DecisionPair specialist={specialist} judge={judge} />
+                {toolCalls.length > 0 && (
+                  <div className="toolCallList">
+                    <span>LangGraph tools</span>
+                    {toolCalls.map((call, index) => (
+                      <ToolCallCard call={call} key={`${call.name}-${index}`} />
+                    ))}
+                  </div>
+                )}
                 {decision?.llm_error && <small>{decision.llm_error}</small>}
               </div>
               <div className="confidenceBadge" data-status={activeCase.review_status}>
@@ -674,6 +818,52 @@ function CaseDrawer({
         )}
       </div>
     </div>
+  );
+}
+
+function DecisionPair({
+  specialist,
+  judge,
+}: {
+  specialist: AgentDecision | null | undefined;
+  judge: AgentDecision | null | undefined;
+}) {
+  if (!specialist && !judge) return null;
+  return (
+    <div className="decisionPair">
+      {specialist && (
+        <div className="decisionCard">
+          <span className="decisionRole">Specialist</span>
+          <strong className="decisionAgent">{specialist.agent}</strong>
+          <p className="decisionMeta">
+            {statusLabel(specialist.review_status)} · {Math.round(specialist.confidence * 100)}%
+          </p>
+          <small className="decisionBody">{specialist.rationale}</small>
+        </div>
+      )}
+      {judge && (
+        <div className="decisionCard">
+          <span className="decisionRole">Judge</span>
+          <strong className="decisionAgent">{judge.agent}</strong>
+          <p className="decisionMeta">
+            {statusLabel(judge.review_status)} · {Math.round(judge.confidence * 100)}%
+          </p>
+          <small className="decisionBody">{judge.review_reason || judge.rationale}</small>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolCallCard({ call }: { call: ToolCallRecord }) {
+  return (
+    <article className="toolCallCard" data-status={call.status}>
+      <div className="toolCallHeader">
+        <strong>{call.name}</strong>
+        <em>{call.status}</em>
+      </div>
+      <p>{call.summary}</p>
+    </article>
   );
 }
 

@@ -1,17 +1,48 @@
 import { AlertTriangle, CheckCircle2, Download, ListChecks, LoaderCircle, Table2, XCircle } from "lucide-react";
+import { useState } from "react";
 
-import type { CabDelayProgress, CategoryProgress, JobResponse, StepState, StepStatus, VisibleMetric } from "../types/jobs";
+import type {
+  CabDelayProgress,
+  CategoryProgress,
+  GraphEvent,
+  InvestigationSummary,
+  JobResponse,
+  StepState,
+  StepStatus,
+  VisibleMetric,
+} from "../types/jobs";
 import MetricsGrid from "./MetricsGrid";
 import WarningsList from "./WarningsList";
 
 type ProcessingTimelineProps = {
   job: JobResponse | null;
   visibleMetrics: VisibleMetric[];
+  graphEvents?: GraphEvent[];
   hasFailed: boolean;
   onDownload: () => void;
 };
 
-function ProcessingTimeline({ job, visibleMetrics, hasFailed, onDownload }: ProcessingTimelineProps) {
+const NODE_LABELS: Record<string, string> = {
+  intake: "Intake",
+  evidence_agent: "Evidence",
+  specialist: "Specialist",
+  judge: "Judge",
+  human_review: "Human review",
+  finalize: "Finalize",
+  portfolio_summary: "Portfolio",
+  vendor_penalty_analysis: "Vendor analysis",
+};
+
+function ProcessingTimeline({
+  job,
+  visibleMetrics,
+  graphEvents = [],
+  hasFailed,
+  onDownload,
+}: ProcessingTimelineProps) {
+  const summary = job?.investigation_summary ?? null;
+  const technicalEvents = graphEvents.length ? graphEvents : job?.graph_events ?? [];
+
   return (
     <section className="processSurface">
       <div className="surfaceHeader processHeader">
@@ -27,6 +58,16 @@ function ProcessingTimeline({ job, visibleMetrics, hasFailed, onDownload }: Proc
           <span>Download ZIP</span>
         </button>
       </div>
+
+      {job?.status === "awaiting_review" && (
+        <div className="statusCallout" data-status="warning">
+          <AlertTriangle size={18} />
+          <span>
+            {summary?.status_line ||
+              `Paused for human review on ${job.pending_interrupts?.length ?? 0} booking(s). Resolve them in Agent cockpit.`}
+          </span>
+        </div>
+      )}
 
       <div className="timeline">
         {(job?.steps ?? []).map((step) => (
@@ -54,9 +95,13 @@ function ProcessingTimeline({ job, visibleMetrics, hasFailed, onDownload }: Proc
         )}
       </div>
 
+      <InvestigationProgressPanel summary={summary} jobStatus={job?.status ?? null} />
+
       <CategoryProgressList categories={job?.category_progress ?? []} />
       <MetricsGrid metrics={visibleMetrics} />
       <WarningsList warnings={job?.warnings ?? []} />
+
+      {technicalEvents.length > 0 && <TechnicalEventDetails events={technicalEvents} />}
 
       {hasFailed && (
         <div className="failureBlock">
@@ -66,6 +111,121 @@ function ProcessingTimeline({ job, visibleMetrics, hasFailed, onDownload }: Proc
       )}
     </section>
   );
+}
+
+function InvestigationProgressPanel({
+  summary,
+  jobStatus,
+}: {
+  summary: InvestigationSummary | null;
+  jobStatus: string | null;
+}) {
+  if (!summary || (!summary.total_cases && !summary.cases_seen && jobStatus === "queued")) {
+    return null;
+  }
+  if (!summary.stages?.length && !summary.status_line) {
+    return null;
+  }
+
+  const show =
+    Boolean(summary.total_cases || summary.cases_seen || summary.status_line) &&
+    (jobStatus === "running" ||
+      jobStatus === "awaiting_review" ||
+      jobStatus === "succeeded" ||
+      summary.cases_seen > 0);
+
+  if (!show) return null;
+
+  return (
+    <div className="investigationProgressPanel">
+      <div className="investigationProgressHeader">
+        <div>
+          <h3>Investigation progress</h3>
+          <p>{summary.status_line || "Preparing investigation"}</p>
+        </div>
+        <strong>
+          {summary.cases_finalized}/{summary.total_cases || summary.cases_seen || 0}
+        </strong>
+      </div>
+      <div className="investigationStageList">
+        {summary.stages.map((stage) => (
+          <div className="investigationStage" data-status={stage.status} key={stage.id}>
+            <div className="investigationStageTop">
+              <span>{stage.label}</span>
+              <em>
+                {stage.total_units > 0
+                  ? `${stage.completed_units}/${stage.total_units}`
+                  : stage.status === "pending"
+                    ? "—"
+                    : "done"}
+              </em>
+            </div>
+            <div className="investigationStageTrack" aria-hidden="true">
+              <span
+                style={{
+                  width: `${
+                    stage.total_units > 0
+                      ? Math.min(100, Math.round((stage.completed_units / stage.total_units) * 100))
+                      : stage.status === "completed"
+                        ? 100
+                        : 0
+                  }%`,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {summary.pending_review > 0 && (
+        <p className="investigationPendingNote">
+          {summary.pending_review} booking{summary.pending_review === 1 ? "" : "s"} waiting for human review
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TechnicalEventDetails({ events }: { events: GraphEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const recent = events.slice(-20).reverse();
+
+  return (
+    <details
+      className="technicalEventDetails"
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+    >
+      <summary>Technical event log</summary>
+      <p className="technicalEventHint">Raw LangGraph telemetry for debugging. Hidden from the main progress view.</p>
+      <ul>
+        {recent.map((event, index) => (
+          <li key={`${event.node ?? "event"}-${event.booking_id ?? ""}-${index}-${event.status ?? ""}`}>
+            <strong>{humanEventTitle(event)}</strong>
+            <p>{humanEventBody(event)}</p>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function humanEventTitle(event: GraphEvent): string {
+  const nodeLabel = NODE_LABELS[event.node ?? ""] || event.node || "Graph";
+  if (event.type === "tool") {
+    return `${nodeLabel} · ${event.tool || "tool"}`;
+  }
+  if (event.type === "interrupt") {
+    return `${nodeLabel} · needs review`;
+  }
+  return nodeLabel;
+}
+
+function humanEventBody(event: GraphEvent): string {
+  const parts = [
+    event.summary || event.status || "",
+    event.booking_id ? `Booking ${event.booking_id}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 function StepProgressBar({ step }: { step: StepState }) {

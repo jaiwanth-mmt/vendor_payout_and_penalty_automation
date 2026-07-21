@@ -20,7 +20,7 @@ SOURCE_LABELS = {
 
 
 class EvidenceToolset:
-    """Agent decisions use comments, Remarks, and Sub Category only; tracking rows are not exposed."""
+    """Legacy gatherer kept for unit helpers. Production uses LangGraph @tools in agents/tools.py."""
 
     def __init__(self) -> None:
         pass
