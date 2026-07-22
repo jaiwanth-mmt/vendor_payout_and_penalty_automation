@@ -408,6 +408,41 @@ class JobStore:
             job["graph_topology"] = topology
             job["updated_at"] = utc_now()
 
+    def mark_awaiting_edit(
+        self,
+        job_id: str,
+        *,
+        metrics: dict[str, Any],
+        category_outputs: list[dict[str, Any]],
+        case_counts: dict[str, int],
+        agent_progress: list[dict[str, Any]],
+        agent_cases: list[dict[str, Any]],
+    ) -> None:
+        with self._lock:
+            job = self._get_job(job_id)
+            now = utc_now()
+            job["status"] = "awaiting_edit"
+            job["current_step"] = "agent_investigation"
+            job["metrics"] = metrics
+            job["category_outputs"] = category_outputs
+            job["case_counts"] = case_counts
+            job["agent_progress"] = agent_progress
+            job["agent_cases"] = agent_cases
+            job["pending_interrupts"] = []
+            job["download_ready"] = False
+            job.setdefault("_investigation_pending_review", set()).clear()
+            rebuild_investigation_summary(job)
+            job["updated_at"] = now
+            step = self._get_step(job, "agent_investigation")
+            step["status"] = "warning"
+            needs_check = sum(1 for case in agent_cases if case.get("ai_bucket") == "needs_check")
+            step["message"] = (
+                (job.get("investigation_summary") or {}).get("status_line")
+                or f"Investigation complete — {len(agent_cases)} cases ready to edit"
+                + (f" ({needs_check} need your check)" if needs_check else "")
+            )
+            step["started_at"] = step["started_at"] or now
+
     def mark_awaiting_review(
         self,
         job_id: str,
@@ -419,6 +454,7 @@ class JobStore:
         agent_cases: list[dict[str, Any]],
         pending_interrupts: list[dict[str, Any]],
     ) -> None:
+        """Legacy HITL pause — kept for tests; production uses mark_awaiting_edit."""
         with self._lock:
             job = self._get_job(job_id)
             now = utc_now()

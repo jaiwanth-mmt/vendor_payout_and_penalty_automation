@@ -1,7 +1,7 @@
 /**
- * JobProgressPage — pipeline timeline, metrics, SSE log + soft CTAs to Review/Outputs.
+ * JobProgressPage — pipeline timeline, metrics, SSE log + soft CTAs to Edit/Outputs.
  */
-import { ArrowRight, ClipboardList, Package } from "lucide-react";
+import { ArrowRight, Package, PencilLine } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import ProcessingTimeline from "../components/ProcessingTimeline";
@@ -14,29 +14,31 @@ export default function JobProgressPage() {
     visibleMetrics,
     graphEvents,
     hasFailed,
-    isAwaitingReview,
+    isAwaitingEdit,
     isComplete,
-    showAgentWorkspace,
+    showEditWorkspace,
   } = useJob();
 
-  const pendingCount = job?.pending_interrupts?.length ?? 0;
-  const needsReviewCount = Number(job?.case_counts?.needs_review ?? pendingCount);
+  const needsCheckCount = Number(job?.metrics?.needs_check_count ?? 0);
+  const totalCases = Number(job?.case_counts?.total_cases ?? job?.metrics?.agent_total_cases ?? 0);
 
   return (
     <div className="progressPage">
-      {isAwaitingReview && showAgentWorkspace && (
+      {isAwaitingEdit && showEditWorkspace && (
         <div className="stageCta" data-tone="warning">
           <div>
-            <strong>Human review needed</strong>
+            <strong>Ready for edits</strong>
             <p>
-              {needsReviewCount > 0
-                ? `${needsReviewCount} case${needsReviewCount === 1 ? "" : "s"} awaiting Approve / Keep review.`
-                : "Investigation paused for human review."}
+              {totalCases > 0
+                ? `${totalCases} booking${totalCases === 1 ? "" : "s"} ready to check${
+                    needsCheckCount > 0 ? ` (${needsCheckCount} need your check)` : ""
+                  }.`
+                : "Investigation finished — open Edit to review booking details."}
             </p>
           </div>
-          <Link className="primaryButton" to={`/jobs/${jobId}/review`}>
-            <ClipboardList size={17} />
-            <span>Open review</span>
+          <Link className="primaryButton" to={`/jobs/${jobId}/edit`}>
+            <PencilLine size={17} />
+            <span>Open edit</span>
             <ArrowRight size={16} />
           </Link>
         </div>
@@ -45,8 +47,8 @@ export default function JobProgressPage() {
       {isComplete && (
         <div className="stageCta" data-tone="success">
           <div>
-            <strong>Investigation complete</strong>
-            <p>Final XLSX and category Excels are ready to preview and download.</p>
+            <strong>Package ready</strong>
+            <p>Final analysis and downloads are available.</p>
           </div>
           <Link className="primaryButton" to={`/jobs/${jobId}/outputs`}>
             <Package size={17} />

@@ -1,5 +1,5 @@
 /**
- * JobReviewPage — AgentCockpit HITL / case workspace for /jobs/:jobId/review.
+ * JobReviewPage — analysis cockpit after edits are approved (no HITL Approve/Keep).
  */
 import { ArrowRight, Clock3, Package } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -12,7 +12,6 @@ export default function JobReviewPage() {
     jobId,
     job,
     showAgentWorkspace,
-    isAwaitingReview,
     isComplete,
     downloadAgentAudit,
     downloadReviewQueue,
@@ -24,11 +23,11 @@ export default function JobReviewPage() {
       <div className="pageEmptySurface emptyState" role="status">
         <Clock3 size={22} />
         <div>
-          <strong>Review unlocks after investigation</strong>
-          <p>Cases and HITL appear once the job reaches awaiting review or succeeds.</p>
+          <strong>Review unlocks after you approve edits</strong>
+          <p>Top vendors, totals, and case details appear once the recovery package is built.</p>
         </div>
-        <Link className="ghostButton" to={`/jobs/${jobId}`}>
-          Back to progress
+        <Link className="ghostButton" to={`/jobs/${jobId}/edit`}>
+          Back to edit
         </Link>
       </div>
     );
@@ -39,7 +38,7 @@ export default function JobReviewPage() {
       {isComplete && (
         <div className="stageCta" data-tone="success">
           <div>
-            <strong>Investigation complete</strong>
+            <strong>Analysis complete</strong>
             <p>Final XLSX and category Excels are ready to preview and download.</p>
           </div>
           <Link className="primaryButton" to={`/jobs/${jobId}/outputs`}>
@@ -52,7 +51,6 @@ export default function JobReviewPage() {
       <AgentCockpit
         job={job}
         isWorkspaceReady={showAgentWorkspace}
-        isAwaitingReview={isAwaitingReview}
         onDownloadAgentAudit={downloadAgentAudit}
         onDownloadReviewQueue={downloadReviewQueue}
         onRefreshJob={refreshJob}

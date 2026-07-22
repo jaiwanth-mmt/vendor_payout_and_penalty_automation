@@ -1,6 +1,6 @@
 /**
  * useJobSession — poll + SSE + downloads for one existing jobId.
- * Used by JobProvider so Progress/Review/Outputs share one session.
+ * Used by JobProvider so Progress/Edit/Review/Outputs share one session.
  * Does not own the upload form (see useCreateJob).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +25,12 @@ function formatMetricValue(key: string, value: number | string): number | string
 
 function shouldStreamEvents(job: JobResponse | null): boolean {
   if (!job) return true;
-  return job.status === "queued" || job.status === "running" || job.status === "awaiting_review";
+  return (
+    job.status === "queued" ||
+    job.status === "running" ||
+    job.status === "awaiting_edit" ||
+    job.status === "awaiting_review"
+  );
 }
 
 export function useJobSession(jobId: string | undefined) {
@@ -33,14 +38,24 @@ export function useJobSession(jobId: string | undefined) {
   const [isLoading, setIsLoading] = useState(Boolean(jobId));
   const [error, setError] = useState<string | null>(null);
   const [graphEvents, setGraphEvents] = useState<GraphEvent[]>([]);
+  const [editGatePassed, setEditGatePassed] = useState(false);
   const pendingEventsRef = useRef<GraphEvent[]>([]);
   const flushTimerRef = useRef<number | null>(null);
 
   const isProcessing = job?.status === "queued" || job?.status === "running";
+  const isAwaitingEdit = job?.status === "awaiting_edit";
   const isAwaitingReview = job?.status === "awaiting_review";
   const isComplete = job?.status === "succeeded";
   const hasFailed = job?.status === "failed";
-  const showAgentWorkspace = isComplete || isAwaitingReview;
+  // Keep Edit available while approve/re-approve flips status to running for packaging.
+  const showEditWorkspace = isAwaitingEdit || isComplete || (job?.status === "running" && editGatePassed);
+  const showAgentWorkspace = isComplete;
+
+  useEffect(() => {
+    if (isAwaitingEdit || isComplete) {
+      setEditGatePassed(true);
+    }
+  }, [isAwaitingEdit, isComplete]);
 
   const fetchJobStatus = useCallback(async (id: string) => {
     const payload = await fetchJob(id);
@@ -66,6 +81,7 @@ export function useJobSession(jobId: string | undefined) {
     setJob(null);
     setGraphEvents([]);
     pendingEventsRef.current = [];
+    setEditGatePassed(false);
     setError(null);
     setIsLoading(true);
 
@@ -88,7 +104,7 @@ export function useJobSession(jobId: string | undefined) {
 
   useEffect(() => {
     if (!jobId || isLoading) return;
-    // Keep polling through awaiting_review so Approve / Keep review updates the timeline.
+    // Keep polling through awaiting_edit so saves / approve update the timeline.
     if (job?.status === "succeeded" || job?.status === "failed") return;
     if (error && !job?.job_id) return;
 
@@ -191,8 +207,10 @@ export function useJobSession(jobId: string | undefined) {
     job,
     isLoading,
     isProcessing,
+    isAwaitingEdit,
     isAwaitingReview,
     isComplete,
+    showEditWorkspace,
     showAgentWorkspace,
     hasFailed,
     error,

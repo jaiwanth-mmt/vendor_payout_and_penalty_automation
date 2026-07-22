@@ -1,4 +1,4 @@
-/** AgentCockpit — orchestrator for agent review workspace. */
+/** AgentCockpit — read-only analysis workspace after edits are approved. */
 
 import {
   AlertTriangle,
@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Download,
   LoaderCircle,
+  PencilLine,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -16,13 +17,11 @@ import {
   fetchAgentCases,
   fetchGraphTopology,
   fetchReviewQueue,
-  resumeAgentCase,
 } from "../../api/jobs";
 import type {
   AgentCase,
   GraphTopology,
   JobResponse,
-  PendingInterrupt,
   ReviewQueueItem,
 } from "../../types/jobs";
 import BookingSearchForm from "../BookingSearchForm";
@@ -30,7 +29,6 @@ import PaginationControls from "../PaginationControls";
 import { AGENT_PAGE_SIZE, formatAmount, pageCount, paginateLocal } from "./agentFormat";
 import CaseDrawer from "./CaseDrawer";
 import GraphTopologyPanel from "./GraphTopologyPanel";
-import HitlPanel from "./HitlPanel";
 import KpiCard from "./KpiCard";
 import ReviewQueueRow from "./ReviewQueueRow";
 import VendorPenaltySummary from "./VendorPenaltySummary";
@@ -38,7 +36,6 @@ import VendorPenaltySummary from "./VendorPenaltySummary";
 type AgentCockpitProps = {
   job: JobResponse | null;
   isWorkspaceReady: boolean;
-  isAwaitingReview?: boolean;
   showDownloadActions?: boolean;
   onDownloadAgentAudit: () => void;
   onDownloadReviewQueue: () => void;
@@ -48,11 +45,9 @@ type AgentCockpitProps = {
 function AgentCockpit({
   job,
   isWorkspaceReady,
-  isAwaitingReview = false,
   showDownloadActions = false,
   onDownloadAgentAudit,
   onDownloadReviewQueue,
-  onRefreshJob,
 }: AgentCockpitProps) {
   const [casePage, setCasePage] = useState(1);
   const [casePageItems, setCasePageItems] = useState<AgentCase[]>([]);
@@ -72,10 +67,7 @@ function AgentCockpit({
   const [isCaseDetailLoading, setIsCaseDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [topology, setTopology] = useState<GraphTopology | null>(null);
-  const [resumeBusy, setResumeBusy] = useState<string | null>(null);
   const [showGraphs, setShowGraphs] = useState(false);
-
-  const pendingInterrupts = job?.pending_interrupts ?? [];
 
   useEffect(() => {
     setCasePage(1);
@@ -110,43 +102,6 @@ function AgentCockpit({
       cancelled = true;
     };
   }, [isWorkspaceReady, job?.job_id]);
-
-  async function handleResume(interrupt: PendingInterrupt, approve: boolean) {
-    if (!job?.job_id) return;
-    setResumeBusy(interrupt.booking_id);
-    setError(null);
-    try {
-      const amount = Number(
-        (interrupt.payload as { recoverable_amount?: number }).recoverable_amount ??
-          (interrupt.payload as { judge_decision?: { recommended_recovery_amount?: number } }).judge_decision
-            ?.recommended_recovery_amount ??
-          0
-      );
-      await resumeAgentCase(job.job_id, interrupt.booking_id, {
-        decision: approve ? "valid_penalty" : "needs_review",
-        review_status: approve ? "auto_ready" : "needs_review",
-        recommended_recovery_amount: approve ? amount : 0,
-        review_reason: approve ? "Approved via LangGraph human review" : "Kept in review via LangGraph HITL",
-        recommended_action: approve ? "Ready for Cab Ops recovery package" : "Review before operational action",
-      });
-      await onRefreshJob?.();
-      // Reload review queue / cases after each resume so counts stay current during HITL.
-      if (job.job_id) {
-        try {
-          const reviewPayload = await fetchReviewQueue(job.job_id, reviewPage);
-          setReviewItems(reviewPayload.items);
-          setReviewItemCount(reviewPayload.item_count);
-          setReviewTotalPages(reviewPayload.total_pages);
-        } catch {
-          // refreshJob already updated snapshot; ignore secondary reload errors
-        }
-      }
-    } catch (resumeError) {
-      setError(resumeError instanceof Error ? resumeError.message : "Resume failed");
-    } finally {
-      setResumeBusy(null);
-    }
-  }
 
   useEffect(() => {
     if (!isWorkspaceReady || !job?.job_id) {
@@ -238,6 +193,8 @@ function AgentCockpit({
   const counts = job?.case_counts ?? {};
   const recommendedActions = summary?.recommended_actions ?? [];
   const pagedActions = paginateLocal(recommendedActions, actionPage);
+  const editedCaseCount = summary?.edited_case_count ?? Number(job?.metrics?.edited_case_count ?? 0);
+  const excludedCaseCount = summary?.excluded_case_count ?? Number(job?.metrics?.excluded_case_count ?? 0);
 
   async function handleReviewSelect(bookingId: string) {
     if (!job?.job_id) return;
@@ -319,7 +276,8 @@ function AgentCockpit({
         <div className="previewTitle">
           <Bot size={22} />
           <div>
-            <h2>Agentic Loss Recovery Copilot</h2>
+            <h2>Recovery analysis</h2>
+            <p>Numbers below reflect your approved edits.</p>
           </div>
         </div>
         <div className="agentActions">
@@ -340,7 +298,7 @@ function AgentCockpit({
             onClick={onDownloadReviewQueue}
           >
             <ClipboardList size={17} />
-            <span>Review queue</span>
+            <span>Ops follow-up queue</span>
           </button>
           <button
             className="ghostButton"
@@ -356,14 +314,6 @@ function AgentCockpit({
 
       <VendorPenaltySummary summary={summary} isWorkspaceReady={isWorkspaceReady} />
 
-      {(isAwaitingReview || pendingInterrupts.length > 0) && (
-        <HitlPanel
-          pendingInterrupts={pendingInterrupts}
-          resumeBusy={resumeBusy}
-          onResume={handleResume}
-        />
-      )}
-
       {topology?.case?.mermaid && (
         <GraphTopologyPanel
           topology={topology}
@@ -373,9 +323,10 @@ function AgentCockpit({
       )}
 
       <div className="agentKpiGrid">
-        <KpiCard icon={<ShieldCheck size={18} />} label="Auto-ready" value={counts.auto_ready ?? 0} />
-        <KpiCard icon={<ClipboardList size={18} />} label="Needs review" value={counts.needs_review ?? 0} />
-        <KpiCard icon={<AlertTriangle size={18} />} label="Missing source" value={counts.missing_evidence ?? 0} />
+        <KpiCard icon={<ShieldCheck size={18} />} label="Included in recovery" value={counts.auto_ready ?? 0} />
+        <KpiCard icon={<ClipboardList size={18} />} label="Needs ops follow-up" value={counts.needs_review ?? 0} />
+        <KpiCard icon={<PencilLine size={18} />} label="Edited bookings" value={editedCaseCount} />
+        <KpiCard icon={<AlertTriangle size={18} />} label="Excluded" value={excludedCaseCount} />
         <KpiCard
           icon={<Sparkles size={18} />}
           label="High-confidence recovery"
@@ -386,14 +337,14 @@ function AgentCockpit({
       <div className="agentGrid">
         <div className="agentPanel">
           <div className="agentPanelHeader">
-            <span>Review queue</span>
+            <span>Ops follow-up queue</span>
             <strong>{reviewItemCount}</strong>
           </div>
           <div className="reviewQueueList">
             {isReviewLoading ? (
               <div className="agentEmpty">
                 <LoaderCircle className="spin" size={24} />
-                <span>Loading review queue</span>
+                <span>Loading follow-up queue</span>
               </div>
             ) : (
               reviewItems.map((item) => (
@@ -401,6 +352,9 @@ function AgentCockpit({
                   item={item}
                   key={item.booking_id}
                   isActive={activeBookingId === item.booking_id}
+                  wasEdited={casePageItems.some(
+                    (caseItem) => caseItem.booking_id === item.booking_id && caseItem.was_edited,
+                  )}
                   onSelect={() => handleReviewSelect(item.booking_id)}
                 />
               ))
@@ -409,13 +363,13 @@ function AgentCockpit({
               <div className="agentEmpty">
                 <ShieldCheck size={24} />
                 <span>
-                  {isWorkspaceReady ? "No review blockers" : "Review queue appears after processing"}
+                  {isWorkspaceReady ? "No ops follow-up items" : "Queue appears after packaging"}
                 </span>
               </div>
             )}
           </div>
           <PaginationControls
-            label="Review queue pagination"
+            label="Ops follow-up pagination"
             page={reviewPage}
             totalPages={reviewTotalPages}
             itemCount={reviewItemCount}
@@ -428,7 +382,7 @@ function AgentCockpit({
 
         <div className="agentPanel">
           <div className="agentPanelHeader">
-            <span>Portfolio actions</span>
+            <span>Recommended actions</span>
             <strong>{recommendedActions.length}</strong>
           </div>
           <div className="actionList">

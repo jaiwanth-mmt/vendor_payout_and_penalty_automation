@@ -20,13 +20,13 @@ const NEXT_STEPS = [
   },
   {
     icon: Sparkles,
-    title: "LangGraph investigation",
-    body: "Evidence tools, specialist, judge, and human review when needed.",
+    title: "Investigate & edit",
+    body: "Agents investigate each booking, then you check and fix details before analysis.",
   },
   {
     icon: Package,
-    title: "Outputs",
-    body: "Final XLSX, category Excels, review queue, and agent audit package.",
+    title: "Review & outputs",
+    body: "Top vendors and totals, then Final XLSX, category Excels, and audit package.",
   },
 ] as const;
 
@@ -75,7 +75,7 @@ export default function NewJobPage() {
               <ClipboardCheck size={22} />
               <div>
                 <h2>What happens next</h2>
-                <p>Same path as Progress · Review · Outputs</p>
+                <p>Same path as Progress · Edit · Review · Outputs</p>
               </div>
             </div>
           </div>

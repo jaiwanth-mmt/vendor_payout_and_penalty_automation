@@ -71,11 +71,14 @@ function CaseDrawer({
             cases.map((item) => (
               <button
                 data-active={item.booking_id === activeBookingId}
+                data-edited={item.was_edited ? "true" : "false"}
+                className={item.was_edited ? "caseSelectorEdited" : undefined}
                 key={item.booking_id}
                 onClick={() => onSelect(item)}
                 type="button"
               >
                 {item.booking_id}
+                {item.was_edited ? " · edited" : ""}
               </button>
             ))
           )}

@@ -138,9 +138,21 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         status_response = client.get(f"/api/jobs/{job_id}")
         assert status_response.status_code == 200
         payload = status_response.json()
-        assert payload["status"] == "succeeded"
+        assert payload["status"] == "awaiting_edit"
         assert payload["metrics"]["prepared_rows"] == 1
         assert payload["metrics"]["category_count"] == 1
+        assert payload["case_counts"]["total_cases"] == 1
+
+        edit_list = client.get(f"/api/jobs/{job_id}/edit-cases", params={"page": 1})
+        assert edit_list.status_code == 200
+        edit_payload = edit_list.json()
+        assert edit_payload["case_count"] == 1
+        assert edit_payload["cases"][0]["booking_id"] == "B1"
+
+        approve_response = client.post(f"/api/jobs/{job_id}/approve-edits")
+        assert approve_response.status_code == 200
+        payload = approve_response.json()
+        assert payload["status"] == "succeeded"
         assert payload["metrics"]["final_output_rows"] == 1
         assert payload["case_counts"]["total_cases"] == 1
         assert payload["agent_summary"]["case_counts"]["total_cases"] == 1
@@ -169,6 +181,24 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
             "columns": FINAL_EXPORT_COLUMNS,
             "download_ready": True,
         }
+
+        # Re-edit after success must remain allowed and rebuild numbers on re-approve.
+        reedit_response = client.patch(
+            f"/api/jobs/{job_id}/edit-cases/B1",
+            json={"recoverable_amount": 250, "edit_outcome": "include"},
+        )
+        assert reedit_response.status_code == 200
+        assert reedit_response.json()["recoverable_amount"] == 250
+        assert reedit_response.json()["was_edited"] is True
+
+        reapprove_response = client.post(f"/api/jobs/{job_id}/approve-edits")
+        assert reapprove_response.status_code == 200
+        payload = reapprove_response.json()
+        assert payload["status"] == "succeeded"
+        assert payload["metrics"]["agent_total_recoverable_amount"] == 250
+        assert payload["agent_summary"]["total_recoverable_amount"] == 250
+        assert payload["agent_summary"]["top_vendors_by_penalty"][0]["total_recoverable"] == 250.0
+
         category_step = next(step for step in payload["steps"] if step["id"] == "categories_processed")
         assert category_step["completed_units"] == 1
         assert category_step["total_units"] == 1
@@ -193,6 +223,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert category_preview_payload["rows"][0][INCABS_INSIGHT_COLUMN] == "API mock Incabs insight."
         assert category_preview_payload["rows"][0][INCABS_COMMENT_SUMMARY_COLUMN] == "API mock combined summary."
         assert category_preview_payload["rows"][0][MESSAGE_COLUMN] == "Cab Delay"
+        assert float(category_preview_payload["rows"][0]["Recoverable"]) == 250
 
         preview_response = client.get(f"/api/jobs/{job_id}/final-output/preview", params={"page": 1, "page_size": 1})
         assert preview_response.status_code == 200
@@ -210,7 +241,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
                 "complaint_against_id": "dispatch-b1",
                 "title": TITLE_VALUE,
                 "message": "Cab Delay",
-                "fine": 100,
+                "fine": 250,
             }
         ]
 
@@ -222,7 +253,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         final_output_df = pd.read_excel(io.BytesIO(final_download_response.content), keep_default_na=False)
         assert final_output_df.columns.tolist() == FINAL_EXPORT_COLUMNS
         assert final_output_df.loc[0, "booking_id"] == "B1"
-        assert final_output_df.loc[0, "fine"] == 100
+        assert float(final_output_df.loc[0, "fine"]) == 250
 
         cases_response = client.get(f"/api/jobs/{job_id}/cases")
         assert cases_response.status_code == 200

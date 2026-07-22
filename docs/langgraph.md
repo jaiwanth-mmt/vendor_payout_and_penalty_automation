@@ -58,18 +58,30 @@ Evidence agent invokes these tools (InjectedState):
 - API: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph` (mermaid), plus `agent_progress` / `pending_interrupts`.
 - Frontend: ProcessingTimeline shows calm investigation stages; AgentCockpit keeps Mermaid topology behind **View graphs** (side-by-side when open) and case evidence behind **View full evidence**; technical SSE log is optional/collapsed.
 
-## Human-in-the-loop
+## Human edit gate (production)
+
+Production API jobs pass **`enable_hitl=False`**. After all cases finalize, the pipeline always pauses at **`awaiting_edit`** (no LangGraph interrupts).
+
+1. Humans PATCH editable fields via `PATCH /api/jobs/{id}/edit-cases/{booking_id}`
+2. `POST /api/jobs/{id}/approve-edits` applies outcomes, rewrites processed category XLSX, runs portfolio, builds ZIP
+3. Review UI is analysis-only (no Approve / Keep review)
+
+Editable fields: recoverable (fine), message, remarks, sub_category.  
+Read-only: booking_id, call comments.  
+Outcomes: `include` → `auto_ready`; `needs_ops` → `needs_review`; `exclude` → omitted from `final_output` + recoverable totals.
+
+## LangGraph HITL (tests / optional)
 
 When judge `review_status` ∈ `{needs_review, missing_evidence}` and `enable_hitl=True`:
 
 1. `human_review` calls LangGraph `interrupt(payload)`
 2. Job status becomes `awaiting_review` (package not finalized)
-3. UI / `POST /api/jobs/{id}/cases/{booking_id}/resume` resumes with `Command(resume=human_decision)`
-4. When no pending interrupts remain, portfolio + package completion runs
+3. `POST /api/jobs/{id}/cases/{booking_id}/resume` resumes with `Command(resume=human_decision)`
+4. When no pending interrupts remain, packaging can run (legacy path)
 
 Checkpointer: in-memory per process by default (`InMemorySaver`), keyed by `job_id`. Optional sqlite under `backend/.runtime/langgraph/` via `use_sqlite=True`.
 
-Production API jobs pass `enable_hitl=True`. Unit tests that need immediate completion pass `enable_hitl=False`.
+Production API jobs pass `enable_hitl=False`. Unit tests that exercise interrupts pass `enable_hitl=True`.
 
 ## Azure LLM
 
