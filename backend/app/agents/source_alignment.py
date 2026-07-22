@@ -11,18 +11,18 @@ from backend.app.domain.complaint_message import (
     build_text_category_classification_prompt,
     categories_from_message,
     format_message_categories,
+    map_complaint_labels,
     normalize_cab_delay_selection,
     ordered_unique_categories,
     parse_message_categories,
 )
 
 
-PrimarySource = Literal["comments", "remarks", ""]
+PrimarySource = Literal["comments", "remarks", "sub_category", ""]
 ComparisonSource = Literal["remarks", "sub_category", "remarks_or_sub_category", ""]
 AlignmentStatus = Literal[
     "aligned",
     "category_mismatch",
-    "booking_id_mismatch",
     "invalid_signal",
     "missing_evidence",
 ]
@@ -32,6 +32,8 @@ SOURCE_LABELS = {
     "remarks": "Remarks",
     "sub_category": "Sub Category",
 }
+VENDOR_NO_SHOW = "Vendor No Show"
+DELAY_OR_NO_SHOW = frozenset({*CAB_DELAY_CATEGORIES, VENDOR_NO_SHOW})
 INVALID_PENALTY_PATTERN = re.compile(
     (
         r"\b(no complaint|no issue|issue resolved|complaint resolved|wrong penalty|"
@@ -88,12 +90,30 @@ class SourceAlignment:
         }
 
 
+def merge_category_lists(*groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    for group in groups:
+        merged.extend(group or [])
+    return ordered_unique_categories(merged)
+
+
+def preferred_row_categories(remarks_categories: list[str], sub_category_categories: list[str]) -> list[str]:
+    """Remarks win over Sub Category when both map (rule iii / iv row side)."""
+    if remarks_categories:
+        return list(remarks_categories)
+    return list(sub_category_categories)
+
+
+def is_delay_or_no_show(categories: list[str]) -> bool:
+    return bool(set(categories) & DELAY_OR_NO_SHOW)
+
+
 def build_source_alignment(case: ClaimCase) -> SourceAlignment:
     return build_source_alignment_from_categories(
         case,
         remarks_categories=[],
         sub_category_categories=[],
-        row_classification_error="LLM row-context classification was not run.",
+        row_classification_error="",
     )
 
 
@@ -153,18 +173,54 @@ def build_source_alignment_from_categories(
     if comparison_source is None:
         comparison_source, comparison_label, comparison_text = combined_comparison_context(remarks, sub_category)
 
+    # Deterministic alias / casefold / similar mapping fills gaps when LLM returns empty.
+    remarks_categories = merge_category_lists(remarks_categories, map_complaint_labels(remarks))
+    sub_category_categories = merge_category_lists(sub_category_categories, map_complaint_labels(sub_category))
     comments_categories = message_categories if comments else []
-    row_categories = ordered_unique_categories([*remarks_categories, *sub_category_categories])
+    row_categories = merge_category_lists(remarks_categories, sub_category_categories)
+    preferred_row = preferred_row_categories(remarks_categories, sub_category_categories)
 
-    if comments:
-        primary_source: PrimarySource = "comments"
-        source_text = comments
-        source_categories = message_categories
-    elif remarks:
-        primary_source = "remarks"
-        source_text = remarks
-        source_categories = message_categories
-    else:
+    def should_prefer_row_for_delay_no_show(comment_cats: list[str], row_cats: list[str]) -> bool:
+        """Rule (iv): Cab Delay family / Vendor No Show pairings prefer Remarks → Sub Category.
+
+        Pure Cab Delay family overlaps (e.g. >1 Hour vs Cab Delay) keep comments as primary.
+        """
+        if not comment_cats or not row_cats:
+            return False
+        if not is_delay_or_no_show(comment_cats) or not is_delay_or_no_show(row_cats):
+            return False
+        comment_set = set(comment_cats)
+        row_set = set(row_cats)
+        if VENDOR_NO_SHOW in comment_set or VENDOR_NO_SHOW in row_set:
+            return True
+        # Non-overlapping delay/no-show pairs (should be rare after aliasing).
+        return not category_overlap(comment_cats, row_cats)
+
+    # (i) No comments and no Remarks → Sub Category only when it maps.
+    if not comments and not remarks:
+        mapped_sub = list(sub_category_categories) or map_complaint_labels(sub_category)
+        if mapped_sub and sub_category:
+            return SourceAlignment(
+                primary_source="sub_category",
+                source_label=SOURCE_LABELS["sub_category"],
+                source_text=sub_category,
+                source_evidence_id=f"{case.booking_id}:sub_category",
+                source_categories=mapped_sub,
+                row_categories=mapped_sub,
+                comments_categories=[],
+                remarks_categories=[],
+                sub_category_categories=mapped_sub,
+                comparison_source="sub_category",
+                comparison_label=SOURCE_LABELS["sub_category"],
+                comparison_text=sub_category,
+                mentioned_booking_ids=[],
+                status="aligned",
+                review_status="auto_ready",
+                reason=(
+                    f"Sub Category maps to {format_categories(mapped_sub)}; "
+                    "comments and Remarks were unavailable."
+                ),
+            )
         return SourceAlignment(
             primary_source="",
             source_label="No source",
@@ -172,38 +228,67 @@ def build_source_alignment_from_categories(
             source_evidence_id="",
             source_categories=[],
             row_categories=[],
-            comments_categories=comments_categories,
-            remarks_categories=remarks_categories,
-            sub_category_categories=sub_category_categories,
+            comments_categories=[],
+            remarks_categories=[],
+            sub_category_categories=[],
             comparison_source=comparison_source,
             comparison_label=comparison_label,
             comparison_text=comparison_text,
             status="missing_evidence",
             review_status="missing_evidence",
-            reason="No comments or Remarks were available; Sub Category alone is not enough for agent recovery.",
+            reason=(
+                "No comments or Remarks were available, and Sub Category could not be mapped "
+                "to an allowed complaint category."
+            ),
         )
+
+    if comments:
+        primary_source: PrimarySource = "comments"
+        source_text = comments
+        source_categories = message_categories
+    else:
+        primary_source = "remarks"
+        source_text = remarks
+        source_categories = message_categories or remarks_categories
 
     source_label = SOURCE_LABELS[primary_source]
     source_evidence_id = f"{case.booking_id}:{primary_source}"
     mentioned_booking_ids = extract_booking_ids(source_text)
-    booking_mismatch = has_booking_id_mismatch(case.booking_id, mentioned_booking_ids)
     invalid_signal = bool(INVALID_PENALTY_PATTERN.search(source_text))
 
-    if booking_mismatch:
-        status: AlignmentStatus = "booking_id_mismatch"
+    # (ii) Booking-ID mismatch is intentionally ignored for review routing.
+
+    if invalid_signal:
+        status: AlignmentStatus = "invalid_signal"
         review_status: Literal["auto_ready", "needs_review", "missing_evidence"] = "needs_review"
-        reason = (
-            f"{source_label} mention booking {', '.join(mentioned_booking_ids)}, "
-            f"which does not match row booking {case.booking_id or 'unknown'}."
-        )
-    elif invalid_signal:
-        status = "invalid_signal"
-        review_status = "needs_review"
         reason = f"{source_label} contains a denied, resolved, or invalid-penalty signal."
-    elif not source_categories:
+    elif not source_categories and primary_source == "comments":
         status = "category_mismatch"
         review_status = "needs_review"
         reason = "message could not be mapped to an allowed complaint category."
+    elif comments and should_prefer_row_for_delay_no_show(source_categories, preferred_row):
+        # (iv) Cab Delay family / Vendor No Show ↔ Cab Delay / Fulfillment Not Done → row wins.
+        if remarks and remarks_categories:
+            primary_source = "remarks"
+            source_text = remarks
+            source_categories = list(remarks_categories)
+        elif sub_category and sub_category_categories:
+            primary_source = "sub_category"
+            source_text = sub_category
+            source_categories = list(sub_category_categories)
+        else:
+            primary_source = "remarks" if remarks else "sub_category"
+            source_text = remarks or sub_category
+            source_categories = list(preferred_row)
+        source_label = SOURCE_LABELS[primary_source]
+        source_evidence_id = f"{case.booking_id}:{primary_source}"
+        status = "aligned"
+        review_status = "auto_ready"
+        reason = (
+            f"Comments indicate {format_categories(comments_categories or message_categories)}; "
+            f"row indicates {format_categories(preferred_row)}. "
+            f"Compatible delay/no-show pairing — using {source_label} as primary source."
+        )
     elif not row_categories:
         status = "category_mismatch"
         review_status = "needs_review"
@@ -322,16 +407,6 @@ def extract_booking_ids(text: str) -> list[str]:
         if booking_id and booking_id not in values:
             values.append(booking_id)
     return values
-
-
-def has_booking_id_mismatch(case_booking_id: str, mentioned_booking_ids: list[str]) -> bool:
-    if not mentioned_booking_ids:
-        return False
-
-    case_key = booking_id_key(case_booking_id)
-    if not case_key:
-        return True
-    return any(booking_id_key(booking_id) != case_key for booking_id in mentioned_booking_ids)
 
 
 def clean_booking_id(value: str) -> str:

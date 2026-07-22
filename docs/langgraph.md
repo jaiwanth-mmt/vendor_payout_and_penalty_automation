@@ -48,7 +48,7 @@ Evidence agent invokes these tools (InjectedState):
 | `get_tracking_context` | Timing / fare / vehicle support |
 | `get_vendor_context` | Vendor / supplier support |
 
-**Policy:** source text remains primary (`comments` → `Remarks`; Sub Category alone = missing evidence). Tracking/vendor/fare are supporting context and must not alone approve a penalty. Judge guardrails in `policy.py` still force review on missing text evidence, booking-id mismatch, and invalid-penalty language.
+**Policy:** source text remains primary (`comments` → `Remarks` → Sub Category when mapped). `Details Change` ≡ `Chauffeur/Vehicle Change`. Cab Delay family ↔ Vendor No Show / Fulfillment Not Done prefers Remarks → Sub Category. Tracking/vendor/fare are supporting context and must not alone approve a penalty. Judge guardrails in `policy.py` still force review on unmapped Sub Category-only rows and invalid-penalty language — not booking-ID mismatch.
 
 ## Streaming + UI
 
@@ -56,7 +56,7 @@ Evidence agent invokes these tools (InjectedState):
 - Job snapshot includes **`investigation_summary`** — executive stage progress (counts + status line). This is the primary UI surface.
 - Raw `graph_events` are retained briefly for a **collapsed technical log** only (not the main feed).
 - API: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph` (mermaid), plus `agent_progress` / `pending_interrupts`.
-- Frontend: ProcessingTimeline shows calm investigation stages; AgentCockpit renders Mermaid topology (sanitized LangGraph HTML labels); technical SSE log is optional/collapsed.
+- Frontend: ProcessingTimeline shows calm investigation stages; AgentCockpit keeps Mermaid topology behind **View graphs** (side-by-side when open) and case evidence behind **View full evidence**; technical SSE log is optional/collapsed.
 
 ## Human-in-the-loop
 

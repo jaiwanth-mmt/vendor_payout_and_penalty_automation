@@ -206,6 +206,29 @@ def write_package_zip(
             archive.write(root_dir / category["processed_filename"], category["processed_filename"])
 
 
+def write_category_outputs_zip(
+    *,
+    output_zip_path: Path,
+    categories: list[dict[str, Any]],
+    root_dir: Path,
+) -> int:
+    """Write a ZIP containing every category prepared/processed XLSX. Returns file count."""
+    output_zip_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for category in categories:
+            for key in ("prepared_filename", "processed_filename"):
+                relative_name = str(category.get(key) or "").strip()
+                if not relative_name:
+                    continue
+                source_path = root_dir / relative_name
+                if not source_path.exists():
+                    continue
+                archive.write(source_path, relative_name)
+                written += 1
+    return written
+
+
 def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for case in cases:

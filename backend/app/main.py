@@ -35,7 +35,7 @@ from backend.app.models import (
     ReviewQueuePageResponse,
 )
 from backend.app.services.job_store import JobStore
-from backend.app.services.package_builder import PACKAGE_FILENAME
+from backend.app.services.package_builder import PACKAGE_FILENAME, write_category_outputs_zip
 from backend.app.services.pipeline import package_after_hitl, process_uploaded_workbook_async
 import asyncio
 import json
@@ -172,6 +172,31 @@ def preview_final_output(
         page_size=page_size,
         booking_id=booking_id,
     )
+
+
+@app.get("/api/jobs/{job_id}/categories/download")
+def download_category_outputs(job_id: str) -> FileResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    job_dir = job_store.get_job_dir(job_id)
+    if snapshot.status != "succeeded" or job_dir is None or not snapshot.category_outputs:
+        raise HTTPException(status_code=409, detail="Category Excel files are not ready yet")
+
+    categories = [category.model_dump() for category in snapshot.category_outputs]
+    zip_path = job_dir / "category_outputs.zip"
+    written = write_category_outputs_zip(
+        output_zip_path=zip_path,
+        categories=categories,
+        root_dir=job_dir,
+    )
+    if written == 0 or not zip_path.exists():
+        raise HTTPException(status_code=409, detail="Category Excel files are not ready yet")
+
+    filename = f"category_outputs_{snapshot.start_date}_to_{snapshot.end_date}.zip"
+    return FileResponse(zip_path, media_type="application/zip", filename=filename)
 
 
 @app.get("/api/jobs/{job_id}/categories/{slug}/preview", response_model=CategoryPreviewResponse)

@@ -20,7 +20,7 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - `backend/app/integrations/tracking_reports.py`: MySQL fetch/prune/vendor join helpers (library only).
 - `backend/app/integrations/redash_call_comments.py`: Redash comment fetch (library only).
 - `backend/app/agents/`: **LangGraph investigation** — `graphs.py`, `runner.py`, `tools.py`, `nodes/`, `policy.py`, `state.py`, `langchain_model.py`, plus source alignment / portfolio helpers.
-- `frontend/src/`: React UI (date-range upload, calm investigation stage progress, collapsed technical event log, AgentCockpit HITL/topology).
+- `frontend/src/`: React UI (date-range upload, calm investigation stage progress, collapsed technical event log, AgentCockpit HITL/topology with collapsed evidence + graphs, category Excel download).
 - `data/demo/`: reference workbook + reference tracking JSON shape (**API does not read tracking JSON**).
 - `docs/langgraph.md`: LangGraph topology, tools, HITL, streaming contracts for coding agents.
 - `docs/agent-playbook.md`: common AI-agent edit recipes.
@@ -52,7 +52,7 @@ Optional: `MYSQL_SUPPLIERS_TABLE_NAME` (default `incabs_suppliers`), `REDASH_*`,
 - **LangGraph changes:** edit `backend/app/agents/graphs.py`, `nodes/`, `tools.py`, `policy.py`, `runner.py`. Read `docs/langgraph.md` first.
 - **Add/remove a subcategory enricher:** register one entry in `CATEGORY_ASYNC_ENRICHERS` + output columns in `CATEGORY_PROCESSORS`; put helpers in a focused `domain/` module. Do **not** move enrichers into LangGraph.
 - **Do not** put MySQL/Redash/Azure HTTP in React or route handlers — use `integrations/`.
-- **Evidence policy:** tools may return tracking/vendor/fare context; **source-text alignment (comments → Remarks → Sub Category) remains primary**. Judge guardrails still force review on missing text evidence / booking-id mismatch / invalid-penalty language.
+- **Evidence policy:** tools may return tracking/vendor/fare context; **source-text alignment (comments → Remarks → Sub Category when mapped) remains primary**. `Details Change` ≡ `Chauffeur/Vehicle Change`. Cab Delay family ↔ Vendor No Show / Fulfillment Not Done uses Remarks → Sub Category as primary. Judge guardrails still force review on unmapped Sub Category-only rows and invalid-penalty language — **not** on booking-ID mismatch.
 - Tests inject `InMemoryTrackingRepository`; never require live DB for `pytest`. Graph tests use `InMemorySaver` / `enable_hitl` flags.
 - After structural code moves: `graphify update .`
 - Run `uv run pytest` and `cd frontend && npm run build` before handoff.

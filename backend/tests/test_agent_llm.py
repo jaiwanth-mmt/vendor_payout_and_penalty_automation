@@ -79,8 +79,15 @@ def categories_for_prompt(prompt: str) -> list[str]:
         categories.append("Extra Money Taken")
     if "lower category vehicle" in normalized:
         categories.append("Low Category Vehicle")
-    if "vendor no show" in normalized or "did not arrive" in normalized:
+    if "vendor no show" in normalized or "did not arrive" in normalized or "never arrived" in normalized:
         categories.append("Vendor No Show")
+    if (
+        "vehicle change" in normalized
+        or "chauffeur" in normalized
+        or "different number" in normalized
+        or "details change" in normalized
+    ):
+        categories.append("Chauffeur/Vehicle Change")
     return categories
 
 
@@ -402,7 +409,7 @@ def test_comments_with_expected_and_extra_categories_are_auto_ready() -> None:
     assert output.loc[0, MESSAGE_COLUMN] == "Cab Delay + Extra Money Taken"
 
 
-def test_comment_booking_id_mismatch_routes_to_review() -> None:
+def test_comment_booking_id_mismatch_does_not_block_auto_ready() -> None:
     df = pd.DataFrame(
         [
             {
@@ -420,8 +427,9 @@ def test_comment_booking_id_mismatch_routes_to_review() -> None:
         investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
     )
 
-    assert cases[0]["review_status"] == "needs_review"
-    assert cases[0]["source_analysis"]["status"] == "booking_id_mismatch"
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert cases[0]["source_analysis"]["mentioned_booking_ids"] == ["NC9999999999"]
 
 
 def test_booking_words_do_not_create_false_id_mismatch() -> None:
@@ -572,7 +580,7 @@ def test_unmappable_remarks_can_still_auto_ready_when_subcategory_matches() -> N
     assert output.loc[0, MESSAGE_COLUMN] == "Vendor No Show"
 
 
-def test_row_context_llm_failure_routes_to_review_without_regex_fallback() -> None:
+def test_row_context_llm_failure_falls_back_to_deterministic_mapping() -> None:
     df = pd.DataFrame(
         [
             {
@@ -600,16 +608,13 @@ def test_row_context_llm_failure_routes_to_review_without_regex_fallback() -> No
         )
     )
 
-    assert cases[0]["review_status"] == "needs_review"
-    assert cases[0]["source_analysis"]["row_categories"] == []
-    assert cases[0]["source_analysis"]["reason"] == (
-        "Remarks could not be classified by the LLM.; "
-        "Sub Category could not be classified by the LLM."
-    )
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert "Extra Money Taken" in cases[0]["source_analysis"]["row_categories"]
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
 
 
-def test_subcategory_only_is_missing_evidence() -> None:
+def test_subcategory_only_maps_to_auto_ready() -> None:
     df = pd.DataFrame(
         [
             {
@@ -626,10 +631,103 @@ def test_subcategory_only_is_missing_evidence() -> None:
         investigate_category_frame_async(df, tracking_bookings={}, llm_generator=None, llm_concurrency=1)
     )
 
-    assert cases[0]["source_analysis"]["row_categories"] == []
-    assert cases[0]["final_decision"]["complaint_categories"] == []
+    assert cases[0]["source_analysis"]["primary_source"] == "sub_category"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Low Category Vehicle"]
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Low Category Vehicle"]
+    assert cases[0]["review_status"] == "auto_ready"
+    assert output.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
+
+
+def test_unmapped_subcategory_only_is_missing_evidence() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "B12b",
+                "Sub Category": "ZZZ_UNKNOWN_LABEL_XYZ",
+                "Remarks": "",
+                "Recoverable": 200,
+                "comments": "",
+            }
+        ]
+    )
+
+    output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=None, llm_concurrency=1)
+    )
+
     assert cases[0]["review_status"] == "missing_evidence"
+    assert cases[0]["source_analysis"]["status"] == "missing_evidence"
+    assert cases[0]["final_decision"]["complaint_categories"] == []
     assert output.loc[0, MESSAGE_COLUMN] == ""
+
+
+def test_details_change_aligns_with_chauffeur_vehicle_change() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC726834321537718669",
+                "Sub Category": "Details Change",
+                "Remarks": "Details Change",
+                "Recoverable": 100,
+                "comments": "Customer said the cab that arrived had a different number (vehicle change).",
+                MESSAGE_COLUMN: "Chauffeur/Vehicle Change",
+            }
+        ]
+    )
+
+    _output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert "Chauffeur/Vehicle Change" in cases[0]["source_analysis"]["row_categories"]
+
+
+def test_vendor_no_show_comments_with_fulfillment_row_uses_sub_category() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC745697770918804619",
+                "Sub Category": "FULFILLMENT NOT DONE",
+                "Remarks": "",
+                "Recoverable": 1000,
+                "comments": "Driver never arrived; customer took another cab. Vendor no show.",
+                MESSAGE_COLUMN: "Vendor No Show",
+            }
+        ]
+    )
+
+    _output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "sub_category"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Vendor No Show"]
+
+
+def test_cab_delay_comments_with_fulfillment_remarks_uses_remarks() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Booking ID": "NC784557958228644186",
+                "Sub Category": "FULFILLMENT NOT DONE",
+                "Remarks": "Cab Delay",
+                "Recoverable": 150,
+                "comments": "Cab did not arrive for more than 30 minutes; treated as delay / no show.",
+                MESSAGE_COLUMN: "Cab Delay + Vendor No Show",
+            }
+        ]
+    )
+
+    _output, cases = asyncio.run(
+        investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
+    )
+
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delay"]
 
 
 def test_operational_tracking_fields_do_not_affect_agent_decision() -> None:

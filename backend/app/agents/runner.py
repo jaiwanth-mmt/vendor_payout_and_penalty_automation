@@ -79,10 +79,14 @@ def ensure_agent_columns(df: pd.DataFrame) -> pd.DataFrame:
 def apply_case_result_to_output(output: pd.DataFrame, index: Any, case: ClaimCase | dict[str, Any]) -> None:
     if isinstance(case, ClaimCase):
         columns = case.to_agent_columns()
+        message = clean_text(case.message or case.source_analysis.get("message"))
     else:
         columns = claim_dict_to_agent_columns(case)
+        message = clean_text(case.get("message") or (case.get("source_analysis") or {}).get("message"))
     for column, value in columns.items():
         output.at[index, column] = value
+    if MESSAGE_COLUMN in output.columns and message:
+        output.at[index, MESSAGE_COLUMN] = message
 
 
 def claim_dict_to_agent_columns(case: dict[str, Any]) -> dict[str, Any]:

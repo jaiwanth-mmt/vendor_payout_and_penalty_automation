@@ -10,10 +10,11 @@ from backend.app.agents.source_alignment import build_source_alignment, format_c
 
 
 CAB_DELAY_CATEGORY = "Cab Delay"
-SOURCE_HIERARCHY = ("comments", "remarks")
+SOURCE_HIERARCHY = ("comments", "remarks", "sub_category")
 SOURCE_LABELS = {
     "comments": "comments",
     "remarks": "Remarks",
+    "sub_category": "Sub Category",
 }
 SOURCE_CONFIDENCE = {
     "comments": 0.93,
@@ -146,9 +147,9 @@ def build_specialist_decision(case: ClaimCase) -> tuple[AgentDecision, list[dict
             categories=[],
             confidence=0.35,
             amount=0,
-            rationale=clean_text(analysis.get("reason")) or "Agent review could not find comments or Remarks.",
+            rationale=clean_text(analysis.get("reason")) or "Agent review could not find a usable source text.",
             status="missing_evidence",
-            reason=clean_text(analysis.get("reason")) or "No comments or Remarks were available for agent review.",
+            reason=clean_text(analysis.get("reason")) or "No comments, Remarks, or mappable Sub Category were available.",
             evidence_ids=[],
         )
         return decision, [

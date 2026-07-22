@@ -257,6 +257,19 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         review_queue_response = client.get(f"/api/jobs/{job_id}/review-queue/download")
         assert review_queue_response.status_code == 200
 
+        category_download_response = client.get(f"/api/jobs/{job_id}/categories/download")
+        assert category_download_response.status_code == 200
+        assert category_download_response.headers["content-type"] == "application/zip"
+        assert (
+            'filename="category_outputs_2026-03-19_to_2026-03-19.zip"'
+            in category_download_response.headers["content-disposition"]
+        )
+        with zipfile.ZipFile(io.BytesIO(category_download_response.content)) as archive:
+            assert set(archive.namelist()) == {
+                "category_files/prepared/cab-delay.xlsx",
+                "category_files/processed/cab-delay.xlsx",
+            }
+
         download_response = client.get(f"/api/jobs/{job_id}/download")
         assert download_response.status_code == 200
         assert download_response.headers["content-type"] == "application/zip"

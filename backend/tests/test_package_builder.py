@@ -17,6 +17,7 @@ from backend.app.services.package_builder import (
     build_final_output_summary,
     build_manifest,
     build_review_queue_dataframe,
+    write_category_outputs_zip,
     write_package_zip,
     write_workbook,
 )
@@ -161,6 +162,32 @@ def test_write_package_zip_keeps_expected_archive_names(tmp_path: Path) -> None:
         assert set(archive.namelist()) == {
             "manifest.json",
             "final_output.xlsx",
+            "category_files/prepared/cab-delay.xlsx",
+            "category_files/processed/cab-delay.xlsx",
+        }
+
+
+def test_write_category_outputs_zip_includes_prepared_and_processed(tmp_path: Path) -> None:
+    prepared_path = tmp_path / "category_files" / "prepared" / "cab-delay.xlsx"
+    processed_path = tmp_path / "category_files" / "processed" / "cab-delay.xlsx"
+    zip_path = tmp_path / "category_outputs.zip"
+    write_workbook(pd.DataFrame([{"Booking ID": "B1"}]), prepared_path)
+    write_workbook(pd.DataFrame([{"Booking ID": "B1", "message": "Cab Delay"}]), processed_path)
+
+    written = write_category_outputs_zip(
+        output_zip_path=zip_path,
+        categories=[
+            {
+                "prepared_filename": "category_files/prepared/cab-delay.xlsx",
+                "processed_filename": "category_files/processed/cab-delay.xlsx",
+            }
+        ],
+        root_dir=tmp_path,
+    )
+
+    assert written == 2
+    with zipfile.ZipFile(zip_path) as archive:
+        assert set(archive.namelist()) == {
             "category_files/prepared/cab-delay.xlsx",
             "category_files/processed/cab-delay.xlsx",
         }
