@@ -6,16 +6,18 @@ import { categoryText, statusLabel } from "./agentFormat";
 function ReviewQueueRow({
   item,
   isActive,
+  wasEdited = false,
   onSelect,
 }: {
   item: ReviewQueueItem;
   isActive: boolean;
+  wasEdited?: boolean;
   onSelect: () => void;
 }) {
   return (
     <button className="reviewQueueRow" data-active={isActive} type="button" onClick={onSelect}>
       <div>
-        <span>{item.booking_id}</span>
+        <span className={wasEdited ? "bookingIdChipEdited" : undefined}>{item.booking_id}</span>
         <p>{item.review_reason}</p>
         <small>
           {item.source_used || "Source"}: {categoryText(item.source_categories || item.message)} · Row:{" "}

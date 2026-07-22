@@ -27,16 +27,24 @@ from backend.app.models import (
     AgentCasesPageResponse,
     CategoryPreviewResponse,
     CreateJobResponse,
+    EditCaseItem,
+    EditCasesPageResponse,
     FinalOutputPreviewResponse,
     GraphTopologyResponse,
     JobResponse,
+    PatchEditCaseRequest,
     PendingInterrupt,
     ResumeCaseRequest,
     ReviewQueuePageResponse,
 )
+from backend.app.services.edit_cases import (
+    edit_case_api_view,
+    edit_metrics,
+    patch_edit_case,
+)
 from backend.app.services.job_store import JobStore
 from backend.app.services.package_builder import PACKAGE_FILENAME, write_category_outputs_zip
-from backend.app.services.pipeline import package_after_hitl, process_uploaded_workbook_async
+from backend.app.services.pipeline import apply_edits_and_package, package_after_hitl, process_uploaded_workbook_async
 import asyncio
 import json
 from backend.app.agents.portfolio import build_case_counts
@@ -272,10 +280,14 @@ def list_review_queue(job_id: str, page: int = Query(1, ge=1)) -> ReviewQueuePag
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status not in {"succeeded", "awaiting_review"}:
+    if snapshot.status not in {"succeeded", "awaiting_edit", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Review queue is not ready yet")
 
-    items = [review_queue_row(case) for case in cases if case.get("review_status") != "auto_ready"]
+    items = [
+        review_queue_row(case)
+        for case in cases
+        if case.get("review_status") != "auto_ready" and not case.get("excluded")
+    ]
     page_items, safe_page, total_pages = paginate_items(items, page=page, page_size=AGENT_PAGE_SIZE)
     return ReviewQueuePageResponse(
         items=page_items,
@@ -294,7 +306,7 @@ def list_agent_cases(job_id: str, page: int = Query(1, ge=1)) -> AgentCasesPageR
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status not in {"succeeded", "awaiting_review"}:
+    if snapshot.status not in {"succeeded", "awaiting_edit", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
 
     page_cases, safe_page, total_pages = paginate_items(cases, page=page, page_size=AGENT_PAGE_SIZE)
@@ -315,7 +327,7 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Job not found") from error
 
-    if snapshot.status not in {"succeeded", "awaiting_review"}:
+    if snapshot.status not in {"succeeded", "awaiting_edit", "awaiting_review"}:
         raise HTTPException(status_code=409, detail="Agent cases are not ready yet")
 
     for case in cases:
@@ -323,6 +335,99 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
             return case
 
     raise HTTPException(status_code=404, detail="Agent case not found")
+
+
+@app.get("/api/jobs/{job_id}/edit-cases", response_model=EditCasesPageResponse)
+def list_edit_cases(
+    job_id: str,
+    page: int = Query(1, ge=1),
+    bucket: str | None = Query(None, pattern="^(needs_check|auto_approved)$"),
+) -> EditCasesPageResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status not in {"awaiting_edit", "succeeded"}:
+        raise HTTPException(status_code=409, detail="Edit workspace is not ready yet")
+
+    filtered = cases
+    if bucket:
+        filtered = [case for case in cases if case.get("ai_bucket") == bucket]
+    counts = edit_metrics(cases)
+    page_cases, safe_page, total_pages = paginate_items(filtered, page=page, page_size=AGENT_PAGE_SIZE)
+    return EditCasesPageResponse(
+        cases=[EditCaseItem(**edit_case_api_view(case)) for case in page_cases],
+        case_count=len(filtered),
+        page=safe_page,
+        page_size=AGENT_PAGE_SIZE,
+        total_pages=total_pages,
+        needs_check_count=counts["needs_check_count"],
+        auto_approved_count=counts["auto_approved_count"],
+        edited_case_count=counts["edited_case_count"],
+        excluded_case_count=counts["excluded_case_count"],
+    )
+
+
+@app.patch("/api/jobs/{job_id}/edit-cases/{booking_id}", response_model=EditCaseItem)
+def patch_job_edit_case(job_id: str, booking_id: str, body: PatchEditCaseRequest) -> EditCaseItem:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status not in {"awaiting_edit", "succeeded"}:
+        raise HTTPException(status_code=409, detail="Job is not editable")
+
+    patch_payload = body.model_dump(exclude_unset=True)
+    updated_cases: list[dict[str, Any]] = []
+    patched: dict[str, Any] | None = None
+    for case in cases:
+        if str(case.get("booking_id", "")).strip() == booking_id:
+            try:
+                patched = patch_edit_case(case, patch_payload)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            updated_cases.append(patched)
+        else:
+            updated_cases.append(case)
+
+    if patched is None:
+        raise HTTPException(status_code=404, detail="Edit case not found")
+
+    job_store.update_agent_cases(job_id, updated_cases)
+    counts = edit_metrics(updated_cases)
+    with job_store._lock:
+        job = job_store._jobs[job_id]
+        job["metrics"] = {
+            **dict(job.get("metrics") or {}),
+            **counts,
+        }
+        from backend.app.services.job_store import utc_now
+
+        job["updated_at"] = utc_now()
+    return EditCaseItem(**edit_case_api_view(patched))
+
+
+@app.post("/api/jobs/{job_id}/approve-edits", response_model=JobResponse)
+async def approve_job_edits(job_id: str) -> JobResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status not in {"awaiting_edit", "succeeded"}:
+        raise HTTPException(status_code=409, detail="Job is not editable")
+
+    try:
+        await _complete_job_after_edits(job_id)
+    except Exception as error:
+        job_store.fail_job(job_id, f"Packaging after edits failed: {error}")
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return job_store.snapshot(job_id)
 
 
 @app.get("/api/jobs/{job_id}/graph", response_model=GraphTopologyResponse)
@@ -447,6 +552,48 @@ async def resume_job_case(job_id: str, booking_id: str, body: ResumeCaseRequest)
     return payload
 
 
+async def _complete_job_after_edits(job_id: str) -> None:
+    """Apply human edits, then build portfolio + package artifacts."""
+    job = job_store._jobs[job_id]
+    job_dir = Path(job["job_dir"])
+    agent_cases = list(job.get("agent_cases") or [])
+    job_store.mark_step_running(job_id, "package_prepared", "Packaging after human edits")
+    with job_store._lock:
+        job["status"] = "running"
+        from backend.app.services.job_store import utc_now
+
+        job["updated_at"] = utc_now()
+    packaged = await apply_edits_and_package(
+        job_dir=job_dir,
+        output_package_path=job_dir / PACKAGE_FILENAME,
+        start_date=str(job.get("start_date") or ""),
+        end_date=str(job.get("end_date") or ""),
+        category_outputs=list(job.get("category_outputs") or []),
+        agent_cases=agent_cases,
+        metrics=dict(job.get("metrics") or {}),
+        job_id=job_id,
+        on_event=lambda event: job_store.append_graph_event(job_id, event),
+    )
+    job_store.mark_step_completed(job_id, "agent_investigation", "LangGraph investigation completed")
+    job_store.mark_step_completed(job_id, "package_prepared", "ZIP package ready after human edits")
+    job_store.complete_job(
+        job_id,
+        metrics=packaged["metrics"],
+        category_outputs=packaged["category_outputs"],
+        package_path=packaged["package_path"],
+        final_output_path=packaged["final_output_path"],
+        final_output=packaged["final_output"],
+        agent_audit_path=packaged["agent_audit_path"],
+        review_queue_path=packaged["review_queue_path"],
+        agent_summary_path=packaged["agent_summary_path"],
+        agent_summary=packaged["agent_summary"],
+        case_counts=packaged["case_counts"],
+        agent_progress=packaged["agent_progress"],
+        agent_cases=packaged["agent_cases"],
+    )
+    job_store.set_pending_interrupts(job_id, [])
+
+
 async def _complete_job_after_hitl(job_id: str, agent_cases: list[dict[str, Any]]) -> None:
     """Build portfolio + package artifacts when packaging was deferred for human review."""
     job = job_store._jobs[job_id]
@@ -518,19 +665,18 @@ async def run_processing_job(
             on_category_progress_initialized=_init_category_and_investigation,
             on_category_progress=lambda slug, update: job_store.update_category_progress(job_id, slug, **update),
             job_id=job_id,
-            enable_hitl=True,
+            enable_hitl=False,
             on_agent_event=lambda event: job_store.append_graph_event(job_id, event),
         )
         job_store.set_graph_topology(job_id, get_graph_topology(job_id))
-        if result.awaiting_review:
-            job_store.mark_awaiting_review(
+        if result.awaiting_edit:
+            job_store.mark_awaiting_edit(
                 job_id,
                 metrics=result.metrics,
                 category_outputs=result.category_outputs,
                 case_counts=result.case_counts,
                 agent_progress=result.agent_progress,
                 agent_cases=result.agent_cases,
-                pending_interrupts=result.pending_interrupts or get_pending_interrupts(job_id),
             )
             return
 

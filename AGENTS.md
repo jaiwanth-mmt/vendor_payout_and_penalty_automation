@@ -1,14 +1,15 @@
 # Agent Guide
 
 ## What This Project Does
-Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a ZIP of per-subcategory workbooks plus agent investigation artifacts. The API filters Excel rows by an **approval date range**, consolidates duplicates, splits by subcategory, fetches **live** tracking/vendor/comment data for those Booking IDs, runs category enrichers + complaint `message` classification, then runs a **LangGraph** investigation (intake → evidence tools → specialist → judge → HITL → finalize → portfolio).
+Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a ZIP of per-subcategory workbooks plus agent investigation artifacts. The API filters Excel rows by an **approval date range**, consolidates duplicates, splits by subcategory, fetches **live** tracking/vendor/comment data for those Booking IDs, runs category enrichers + complaint `message` classification, runs a **LangGraph** investigation (intake → evidence tools → specialist → judge → finalize), pauses for a human **Edit** stage, then builds portfolio analysis + ZIP.
 
 ## Project Map
-- `backend/app/main.py`: FastAPI routes, SSE/graph/HITL resume, job lifecycle wiring.
+- `backend/app/main.py`: FastAPI routes, SSE/graph, edit-cases / approve-edits, job lifecycle wiring.
 - `backend/app/models.py`: API response models — keep aligned with `frontend/src/types/jobs.ts`.
-- `backend/app/services/pipeline.py`: orchestration facade (date range → live tracking → category registry → LangGraph investigation → package).
-- `backend/app/services/package_builder.py`: XLSX, manifest, ZIP, preview payloads.
-- `backend/app/services/job_store.py`: in-memory job lifecycle/progress (`awaiting_review`, `investigation_summary`, short graph-event retention).
+- `backend/app/services/pipeline.py`: orchestration facade (date range → live tracking → category registry → LangGraph investigation → awaiting_edit → package after approve).
+- `backend/app/services/edit_cases.py`: edit snapshots, PATCH validation, outcome → review_status mapping.
+- `backend/app/services/package_builder.py`: XLSX, manifest, ZIP, preview payloads; applies edits onto processed frames.
+- `backend/app/services/job_store.py`: in-memory job lifecycle/progress (`awaiting_edit`, `investigation_summary`, short graph-event retention).
 - `backend/app/domain/penalty_dataset.py`: workbook filter (date range), CARBD/recoverable filters, dedupe, shape.
 - `backend/app/domain/subcategories.py`: cleaned subcategory names, slugs, split.
 - `backend/app/domain/category_processors.py`: **processor registry** (`CATEGORY_ASYNC_ENRICHERS`) + message/Cab Delay LLM loops; calls LangGraph runner after enrichers.
@@ -20,9 +21,9 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - `backend/app/integrations/tracking_reports.py`: MySQL fetch/prune/vendor join helpers (library only).
 - `backend/app/integrations/redash_call_comments.py`: Redash comment fetch (library only).
 - `backend/app/agents/`: **LangGraph investigation** — `graphs.py`, `runner.py`, `tools.py`, `nodes/`, `policy.py`, `state.py`, `langchain_model.py`, plus source alignment / portfolio helpers.
-- `frontend/src/`: React multi-page UI — `/` upload (`useCreateJob`), `/jobs/:jobId` progress, `/jobs/:jobId/review` HITL, `/jobs/:jobId/outputs` downloads. `JobProvider`/`useJobSession` own poll+SSE across job routes. Agent cockpit under `components/agent/`.
+- `frontend/src/`: React multi-page UI — `/` upload, `/jobs/:jobId` progress, `/jobs/:jobId/edit`, `/jobs/:jobId/review` (analysis only), `/jobs/:jobId/outputs`. `JobProvider`/`useJobSession` own poll+SSE across job routes.
 - `data/demo/`: reference workbook + reference tracking JSON shape (**API does not read tracking JSON**).
-- `docs/langgraph.md`: LangGraph topology, tools, HITL, streaming contracts for coding agents.
+- `docs/langgraph.md`: LangGraph topology, tools, edit gate, streaming contracts for coding agents.
 - `docs/agent-playbook.md`: common AI-agent edit recipes.
 
 ## Run Commands
@@ -40,8 +41,10 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
    - Vendor names via `incabs_suppliers` (`oid` ← supplier ids on tracking rows → `on_final` as `vendor_name`)
    - Redash call comments when `REDASH_API_KEY` is set
 5. Registry-dispatched category enrichers + `message` column.
-6. LangGraph per-case investigation (tools + specialist + judge + optional HITL interrupt).
-7. If interrupts remain → job status `awaiting_review`. Else portfolio graph → ZIP under `backend/.runtime/jobs/`.
+6. LangGraph per-case investigation with **`enable_hitl=False`** (judge labels still set; no interrupt pause).
+7. Job status → **`awaiting_edit`**. Humans edit recoverable / message / remarks / sub_category and set Include / Needs ops / Exclude (booking ID + call comments read-only).
+8. `POST /api/jobs/{id}/approve-edits` → rewrite processed XLSX → portfolio → ZIP → `succeeded`.
+9. Review UI shows analysis only (top vendors, totals); Outputs for downloads.
 
 ## Live Tracking Config (`.env`)
 Required for API jobs: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_TABLE_NAME` (default `tracking_reports_raw`).
@@ -50,9 +53,10 @@ Optional: `MYSQL_SUPPLIERS_TABLE_NAME` (default `incabs_suppliers`), `REDASH_*`,
 ## Safe Edit Guidance
 - Keep ZIP layout stable unless the user asks to change contracts.
 - **LangGraph changes:** edit `backend/app/agents/graphs.py`, `nodes/`, `tools.py`, `policy.py`, `runner.py`. Read `docs/langgraph.md` first.
+- **Edit-stage changes:** `backend/app/services/edit_cases.py`, approve path in `pipeline.apply_edits_and_package`, routes in `main.py`, UI under `frontend/src/pages/JobEditPage.tsx`.
 - **Add/remove a subcategory enricher:** register one entry in `CATEGORY_ASYNC_ENRICHERS` + output columns in `CATEGORY_PROCESSORS`; put helpers in a focused `domain/` module. Do **not** move enrichers into LangGraph.
 - **Do not** put MySQL/Redash/Azure HTTP in React or route handlers — use `integrations/`.
-- **Evidence policy:** tools may return tracking/vendor/fare context; **source-text alignment (comments → Remarks → Sub Category when mapped) remains primary**. `Details Change` ≡ `Chauffeur/Vehicle Change`. Cab Delay family ↔ Vendor No Show / Fulfillment Not Done uses Remarks → Sub Category as primary. Judge guardrails still force review on unmapped Sub Category-only rows and invalid-penalty language — **not** on booking-ID mismatch.
-- Tests inject `InMemoryTrackingRepository`; never require live DB for `pytest`. Graph tests use `InMemorySaver` / `enable_hitl` flags.
+- **Evidence policy:** tools may return tracking/vendor/fare context; **source-text alignment (comments → Remarks → Sub Category when mapped) remains primary**. `Details Change` ≡ `Chauffeur/Vehicle Change`. Cab Delay family ↔ Vendor No Show / Fulfillment Not Done uses Remarks → Sub Category as primary. Judge guardrails still force review labels on unmapped Sub Category-only rows and invalid-penalty language — **not** on booking-ID mismatch.
+- Tests inject `InMemoryTrackingRepository`; never require live DB for `pytest`. Graph HITL unit tests may still use `enable_hitl=True`; production jobs use `enable_hitl=False` + edit stage.
 - After structural code moves: `graphify update .`
 - Run `uv run pytest` and `cd frontend && npm run build` before handoff.

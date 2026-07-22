@@ -53,12 +53,22 @@ function ProcessingTimeline({
         </div>
       </div>
 
+      {job?.status === "awaiting_edit" && (
+        <div className="statusCallout" data-status="warning">
+          <AlertTriangle size={18} />
+          <span>
+            {summary?.status_line ||
+              "Investigation complete — open Edit to check booking details before analysis."}
+          </span>
+        </div>
+      )}
+
       {job?.status === "awaiting_review" && (
         <div className="statusCallout" data-status="warning">
           <AlertTriangle size={18} />
           <span>
             {summary?.status_line ||
-              `Paused for human review on ${job.pending_interrupts?.length ?? 0} booking(s). Resolve them in Agent cockpit.`}
+              `Paused for human review on ${job.pending_interrupts?.length ?? 0} booking(s).`}
           </span>
         </div>
       )}
@@ -124,6 +134,7 @@ function InvestigationProgressPanel({
   const show =
     Boolean(summary.total_cases || summary.cases_seen || summary.status_line) &&
     (jobStatus === "running" ||
+      jobStatus === "awaiting_edit" ||
       jobStatus === "awaiting_review" ||
       jobStatus === "succeeded" ||
       summary.cases_seen > 0);

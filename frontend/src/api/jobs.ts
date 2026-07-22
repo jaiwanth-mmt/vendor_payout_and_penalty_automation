@@ -3,9 +3,12 @@ import type {
   AgentCasesResponse,
   CategoryPreviewResponse,
   CreateJobResponse,
+  EditCaseItem,
+  EditCasesPageResponse,
   FinalOutputPreviewResponse,
   GraphTopology,
   JobResponse,
+  PatchEditCaseRequest,
   PendingInterrupt,
   ResumeCaseRequest,
   ReviewQueuePageResponse
@@ -97,6 +100,52 @@ export async function fetchAgentCase(jobId: string, bookingId: string): Promise<
     throw new Error(payload.detail ?? "Unable to fetch agent case");
   }
   return (await response.json()) as AgentCase;
+}
+
+export async function fetchEditCases(
+  jobId: string,
+  page: number,
+  bucket?: "needs_check" | "auto_approved"
+): Promise<EditCasesPageResponse> {
+  const searchParams = new URLSearchParams({
+    page: String(page)
+  });
+  if (bucket) {
+    searchParams.set("bucket", bucket);
+  }
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/edit-cases?${searchParams.toString()}`));
+  if (!response.ok) {
+    throw new Error("Unable to fetch edit cases");
+  }
+  return (await response.json()) as EditCasesPageResponse;
+}
+
+export async function patchEditCase(
+  jobId: string,
+  bookingId: string,
+  body: PatchEditCaseRequest
+): Promise<EditCaseItem> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/edit-cases/${encodeURIComponent(bookingId)}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to save edit");
+  }
+  return (await response.json()) as EditCaseItem;
+}
+
+export async function approveEdits(jobId: string): Promise<JobResponse> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/approve-edits`), {
+    method: "POST"
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to approve edits");
+  }
+  return (await response.json()) as JobResponse;
 }
 
 export async function fetchGraphTopology(jobId: string): Promise<GraphTopology> {

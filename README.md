@@ -1,6 +1,6 @@
 # Agentic Loss Recovery Copilot
 
-React + FastAPI app that turns a QlikSense loss-recovery workbook into a Cab Ops ZIP package, with a **LangGraph** investigation layer (tools, streaming, human-in-the-loop).
+React + FastAPI app that turns a QlikSense loss-recovery workbook into a Cab Ops ZIP package, with a **LangGraph** investigation layer and a human **Edit** stage before final analysis.
 
 For each job it:
 
@@ -10,21 +10,23 @@ For each job it:
 4. Looks up **vendor names** from `incabs_suppliers`
 5. Optionally fetches **call comments** from Redash (MyDesk source)
 6. Enriches each subcategory and classifies a complaint `message`
-7. Runs LangGraph investigation: intake → evidence tools → specialist → judge → HITL (when needed) → portfolio → ZIP
+7. Runs LangGraph investigation: intake → evidence tools → specialist → judge → finalize
+8. Pauses for **Edit** (humans fix fine / message / remarks / sub category, then approve)
+9. Builds portfolio analysis + ZIP → Review (read-only) → Outputs
 
 ## Project layout
 
 ```text
 backend/app/
-  main.py           FastAPI API (SSE, graph topology, HITL resume)
+  main.py           FastAPI API (SSE, graph topology, edit / approve-edits)
   models.py         response contracts (keep aligned with frontend types)
   agents/           LangGraph graphs, tools, nodes, runner, policy, portfolio
   core/             paths, env loading, shared tracking_utils
   domain/           Excel shaping, subcategory split, category registry/enrichers
   integrations/     Azure LLM, MySQL tracking helpers, Redash, TrackingRepository
-  services/         pipeline orchestration, package builder, job store
+  services/         pipeline, edit_cases, package builder, job store
   cli/              help entrypoint only
-frontend/src/       multi-page UI (`/`, `/jobs/:id`, `/review`, `/outputs`); JobProvider + AgentCockpit
+frontend/src/       multi-page UI (`/`, `/jobs/:id`, `/edit`, `/review`, `/outputs`)
 data/demo/          sample workbook + reference tracking JSON (API does not read JSON for tracking)
 docs/langgraph.md   LangGraph contracts for coding agents
 docs/agent-playbook.md

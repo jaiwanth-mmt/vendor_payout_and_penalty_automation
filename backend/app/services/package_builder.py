@@ -49,6 +49,9 @@ AGENT_AUDIT_COLUMNS = [
     "evidence_ids",
     "evidence_count",
     "trace_count",
+    "edit_outcome",
+    "was_edited",
+    "excluded",
 ]
 REVIEW_QUEUE_COLUMNS = [
     "booking_id",
@@ -95,20 +98,76 @@ def write_workbook(df: pd.DataFrame, path: Path) -> None:
     df.to_excel(path, index=False)
 
 
-def build_final_output_dataframe(processed_frames: list[pd.DataFrame]) -> pd.DataFrame:
+def build_final_output_dataframe(
+    processed_frames: list[pd.DataFrame],
+    *,
+    exclude_booking_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    excluded = {str(booking_id).strip() for booking_id in (exclude_booking_ids or set()) if str(booking_id).strip()}
     final_frames: list[pd.DataFrame] = []
     for frame in processed_frames:
-        output = pd.DataFrame(index=frame.index)
+        working = frame
+        if excluded and "Booking ID" in working.columns:
+            booking_series = working["Booking ID"].fillna("").astype(str).str.strip()
+            working = working.loc[~booking_series.isin(excluded)].copy()
+        if working.empty:
+            continue
+        output = pd.DataFrame(index=working.index)
         for source_column, target_column in FINAL_EXPORT_COLUMN_MAP:
-            if source_column in frame.columns:
-                output[target_column] = frame[source_column]
+            if source_column in working.columns:
+                output[target_column] = working[source_column]
             else:
-                output[target_column] = pd.Series([""] * len(frame), index=frame.index, dtype=object)
+                output[target_column] = pd.Series([""] * len(working), index=working.index, dtype=object)
         final_frames.append(output.loc[:, FINAL_EXPORT_COLUMNS].copy())
 
     if not final_frames:
         return pd.DataFrame(columns=FINAL_EXPORT_COLUMNS)
     return pd.concat(final_frames, ignore_index=True).loc[:, FINAL_EXPORT_COLUMNS]
+
+
+def apply_case_edits_to_processed_frame(frame: pd.DataFrame, cases_by_booking: dict[str, dict[str, Any]]) -> pd.DataFrame:
+    """Rewrite editable Excel columns from post-edit agent_cases so final_output stays consistent."""
+    if frame.empty or "Booking ID" not in frame.columns or not cases_by_booking:
+        return frame
+
+    output = frame.copy()
+    for column in ("Recoverable", "Sub Category", "Remarks", MESSAGE_COLUMN, "agent_review_status", "agent_decision", "agent_recommended_action", "agent_review_reason"):
+        if column in output.columns:
+            output[column] = output[column].astype(object)
+
+    for index, row in output.iterrows():
+        booking_id = str(row.get("Booking ID") or "").strip()
+        case = cases_by_booking.get(booking_id)
+        if not case:
+            continue
+        if "Recoverable" in output.columns:
+            output.at[index, "Recoverable"] = case.get("recoverable_amount", 0)
+        if "Sub Category" in output.columns:
+            output.at[index, "Sub Category"] = case.get("sub_category", "")
+        if "Remarks" in output.columns:
+            output.at[index, "Remarks"] = case.get("remarks", "")
+        if MESSAGE_COLUMN in output.columns:
+            output.at[index, MESSAGE_COLUMN] = case.get("message", "")
+        decision = case.get("final_decision") or {}
+        if "agent_review_status" in output.columns:
+            output.at[index, "agent_review_status"] = case.get("review_status", "")
+        if "agent_decision" in output.columns:
+            output.at[index, "agent_decision"] = decision.get("decision", "")
+        if "agent_recommended_action" in output.columns:
+            output.at[index, "agent_recommended_action"] = decision.get("recommended_action", "")
+        if "agent_review_reason" in output.columns:
+            output.at[index, "agent_review_reason"] = decision.get("review_reason", "")
+    return output
+
+
+def excluded_booking_ids(cases: list[dict[str, Any]]) -> set[str]:
+    excluded: set[str] = set()
+    for case in cases:
+        if case.get("excluded") or str(case.get("edit_outcome") or "").strip() == "exclude":
+            booking_id = str(case.get("booking_id") or "").strip()
+            if booking_id:
+                excluded.add(booking_id)
+    return excluded
 
 
 def build_final_output_summary(
@@ -268,6 +327,9 @@ def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
                 "evidence_ids": ", ".join(decision.get("evidence_ids", [])),
                 "evidence_count": len(case.get("evidence", [])),
                 "trace_count": len(case.get("trace", [])),
+                "edit_outcome": case.get("edit_outcome", ""),
+                "was_edited": bool(case.get("was_edited")),
+                "excluded": bool(case.get("excluded")),
             }
         )
     return pd.DataFrame(rows, columns=AGENT_AUDIT_COLUMNS)
@@ -276,6 +338,8 @@ def build_agent_audit_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
 def build_review_queue_dataframe(cases: list[dict[str, Any]]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for case in cases:
+        if case.get("excluded") or str(case.get("edit_outcome") or "").strip() == "exclude":
+            continue
         if case.get("review_status") == "auto_ready":
             continue
 

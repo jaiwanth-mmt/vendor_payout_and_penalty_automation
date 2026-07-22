@@ -6,6 +6,7 @@ import { Route, Routes } from "react-router-dom";
 import { JobProvider } from "./context/JobProvider";
 import AppShell from "./layouts/AppShell";
 import JobLayout from "./layouts/JobLayout";
+import JobEditPage from "./pages/JobEditPage";
 import JobOutputsPage from "./pages/JobOutputsPage";
 import JobProgressPage from "./pages/JobProgressPage";
 import JobReviewPage from "./pages/JobReviewPage";
@@ -26,6 +27,7 @@ export default function App() {
           }
         >
           <Route index element={<JobProgressPage />} />
+          <Route path="edit" element={<JobEditPage />} />
           <Route path="review" element={<JobReviewPage />} />
           <Route path="outputs" element={<JobOutputsPage />} />
         </Route>

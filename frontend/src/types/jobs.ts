@@ -1,5 +1,7 @@
 export type StepStatus = "pending" | "running" | "completed" | "warning" | "failed";
-export type JobStatus = "queued" | "running" | "awaiting_review" | "succeeded" | "failed";
+export type JobStatus = "queued" | "running" | "awaiting_edit" | "awaiting_review" | "succeeded" | "failed";
+export type EditOutcome = "include" | "needs_ops" | "exclude";
+export type AiBucket = "needs_check" | "auto_approved";
 
 export type StepState = {
   id: string;
@@ -130,6 +132,10 @@ export type AgentSummary = {
   top_subcategories_by_count: VendorSubcategorySummary[];
   missing_data_hotspots: string[];
   recommended_actions: string[];
+  edited_case_count?: number;
+  excluded_case_count?: number;
+  needs_check_count?: number;
+  auto_approved_count?: number;
 };
 
 export type VendorSubcategorySummary = {
@@ -207,6 +213,12 @@ export type AgentCase = {
   specialist_decision: AgentDecision | null;
   judge_decision: AgentDecision | null;
   final_decision: AgentDecision | null;
+  ai_bucket?: AiBucket;
+  ai_review_status?: string;
+  edit_outcome?: EditOutcome;
+  was_edited?: boolean;
+  edited_fields?: string[];
+  excluded?: boolean;
 };
 
 export type AgentCasesResponse = {
@@ -300,4 +312,41 @@ export type ResumeCaseRequest = {
   review_reason?: string;
   rationale?: string;
   recommended_action?: string;
+};
+
+export type EditCaseItem = {
+  booking_id: string;
+  comments: string;
+  recoverable_amount: number;
+  message: string;
+  remarks: string;
+  sub_category: string;
+  vendor_name: string;
+  ai_bucket: AiBucket;
+  ai_review_status: string;
+  edit_outcome: EditOutcome;
+  was_edited: boolean;
+  edited_fields: string[];
+  review_reason: string;
+  excluded: boolean;
+};
+
+export type EditCasesPageResponse = {
+  cases: EditCaseItem[];
+  case_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  needs_check_count: number;
+  auto_approved_count: number;
+  edited_case_count: number;
+  excluded_case_count: number;
+};
+
+export type PatchEditCaseRequest = {
+  recoverable_amount?: number;
+  message?: string;
+  remarks?: string;
+  sub_category?: string;
+  edit_outcome?: EditOutcome;
 };

@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 
 
 StepStatus = Literal["pending", "running", "completed", "warning", "failed"]
-JobStatus = Literal["queued", "running", "awaiting_review", "succeeded", "failed"]
+JobStatus = Literal["queued", "running", "awaiting_edit", "awaiting_review", "succeeded", "failed"]
+EditOutcome = Literal["include", "needs_ops", "exclude"]
+AiBucket = Literal["needs_check", "auto_approved"]
 
 
 class StepState(BaseModel):
@@ -146,6 +148,43 @@ class ResumeCaseRequest(BaseModel):
     recommended_action: str = ""
 
 
+class PatchEditCaseRequest(BaseModel):
+    recoverable_amount: float | None = None
+    message: str | None = None
+    remarks: str | None = None
+    sub_category: str | None = None
+    edit_outcome: EditOutcome | None = None
+
+
+class EditCaseItem(BaseModel):
+    booking_id: str
+    comments: str = ""
+    recoverable_amount: float = 0
+    message: str = ""
+    remarks: str = ""
+    sub_category: str = ""
+    vendor_name: str = ""
+    ai_bucket: AiBucket = "needs_check"
+    ai_review_status: str = ""
+    edit_outcome: EditOutcome = "needs_ops"
+    was_edited: bool = False
+    edited_fields: list[str] = Field(default_factory=list)
+    review_reason: str = ""
+    excluded: bool = False
+
+
+class EditCasesPageResponse(BaseModel):
+    cases: list[EditCaseItem] = Field(default_factory=list)
+    case_count: int
+    page: int
+    page_size: int
+    total_pages: int
+    needs_check_count: int = 0
+    auto_approved_count: int = 0
+    edited_case_count: int = 0
+    excluded_case_count: int = 0
+
+
 class AgentSummary(BaseModel):
     executive_summary: str = ""
     case_counts: dict[str, int] = Field(default_factory=dict)
@@ -159,6 +198,10 @@ class AgentSummary(BaseModel):
     top_subcategories_by_count: list[dict[str, Any]] = Field(default_factory=list)
     missing_data_hotspots: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
+    edited_case_count: int = 0
+    excluded_case_count: int = 0
+    needs_check_count: int = 0
+    auto_approved_count: int = 0
 
 
 class AgentCasesPageResponse(BaseModel):

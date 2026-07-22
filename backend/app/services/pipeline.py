@@ -16,7 +16,7 @@ from backend.app.agents.orchestrator import (
     build_portfolio_summary_async,
     investigate_category_frame_async,
 )
-from backend.app.agents.runner import get_pending_interrupts, run_portfolio_for_job
+from backend.app.agents.runner import run_portfolio_for_job
 from backend.app.integrations.llm_client import call_azure_openai_async
 from backend.app.integrations.tracking import TrackingRepository, matched_booking_ids
 from backend.app.domain.category_processors import (
@@ -47,6 +47,12 @@ from backend.app.domain.subcategories import (
     split_by_subcategory,
 )
 from backend.app.domain.tracking_common import enrich_common_tracking_fields
+from backend.app.services.edit_cases import (
+    apply_edit_outcomes,
+    cases_for_portfolio,
+    edit_metrics,
+    prepare_cases_for_edit,
+)
 from backend.app.services.package_builder import (
     AGENT_AUDIT_FILENAME,
     AGENT_SUMMARY_FILENAME,
@@ -57,12 +63,14 @@ from backend.app.services.package_builder import (
     PREPARED_CATEGORY_ROOT,
     PROCESSED_CATEGORY_ROOT,
     REVIEW_QUEUE_FILENAME,
+    apply_case_edits_to_processed_frame,
     build_agent_audit_dataframe,
     build_category_output_payload,
     build_final_output_dataframe,
     build_final_output_summary,
     build_manifest,
     build_review_queue_dataframe,
+    excluded_booking_ids,
     write_package_zip,
     write_workbook,
 )
@@ -105,6 +113,7 @@ class PipelineResult:
     case_counts: dict[str, int]
     agent_progress: list[dict[str, Any]]
     agent_cases: list[dict[str, Any]]
+    awaiting_edit: bool = False
     awaiting_review: bool = False
     pending_interrupts: list[dict[str, Any]] | None = None
     job_id: str | None = None
@@ -348,70 +357,57 @@ async def process_uploaded_workbook_async(
         if category_cases is not None
         for case in category_cases
     ]
-    pending_interrupts = get_pending_interrupts(resolved_job_id) if enable_hitl else []
-    case_counts = build_case_counts(agent_cases)
-
-    if pending_interrupts:
-        agent_progress = build_agent_progress(agent_cases, agent_summary=None)
-        metrics = {
-            "raw_rows": len(raw_df),
-            "date_filtered_rows": len(date_filtered_df),
-            "carbd_rows": len(carbd_df),
-            "recoverable_rows": len(recoverable_df),
-            "prepared_rows": len(prepared_df),
-            "category_count": len(finalized_category_outputs),
-            "tracking_matched_bookings": len(matched_ids),
-            "tracking_unmatched_bookings": len(unmatched_booking_ids),
-            "agent_total_cases": case_counts["total_cases"],
-            "agent_auto_ready_cases": case_counts["auto_ready"],
-            "agent_needs_review_cases": case_counts["needs_review"],
-            "agent_missing_evidence_cases": case_counts["missing_evidence"],
-            "agent_contradiction_cases": case_counts["contradiction"],
-            "agent_failed_cases": case_counts["failed"],
-            "pending_human_reviews": len(pending_interrupts),
-        }
-        return PipelineResult(
-            metrics=metrics,
-            warnings=warnings,
-            category_outputs=finalized_category_outputs,
-            package_path=output_package_path,
-            manifest_path=manifest_path,
-            final_output_path=job_dir / FINAL_OUTPUT_FILENAME,
-            final_output={},
-            agent_audit_path=job_dir / AGENT_AUDIT_FILENAME,
-            review_queue_path=job_dir / REVIEW_QUEUE_FILENAME,
-            agent_summary_path=job_dir / AGENT_SUMMARY_FILENAME,
-            agent_summary={},
-            case_counts=case_counts,
-            agent_progress=agent_progress,
-            agent_cases=agent_cases,
-            awaiting_review=True,
-            pending_interrupts=pending_interrupts,
-            job_id=resolved_job_id,
-        )
-
-    return await finalize_pipeline_package(
-        job_dir=job_dir,
-        output_package_path=output_package_path,
-        manifest_path=manifest_path,
-        start_date=start_date,
-        end_date=end_date,
-        raw_df=raw_df,
-        date_filtered_df=date_filtered_df,
-        carbd_df=carbd_df,
-        recoverable_df=recoverable_df,
-        prepared_df=prepared_df,
-        finalized_category_outputs=finalized_category_outputs,
-        processed_category_frames=processed_category_frames,
-        agent_cases=agent_cases,
-        cab_delay_summary=cab_delay_summary,
-        matched_ids=matched_ids,
-        unmatched_booking_ids=unmatched_booking_ids,
+    edit_cases = prepare_cases_for_edit(agent_cases)
+    case_counts = build_case_counts(edit_cases)
+    agent_progress = build_agent_progress(edit_cases, agent_summary=None)
+    edit_counts = edit_metrics(edit_cases)
+    metrics = {
+        "raw_rows": len(raw_df),
+        "date_filtered_rows": len(date_filtered_df),
+        "carbd_rows": len(carbd_df),
+        "recoverable_rows": len(recoverable_df),
+        "prepared_rows": len(prepared_df),
+        "category_count": len(finalized_category_outputs),
+        "tracking_matched_bookings": len(matched_ids),
+        "tracking_unmatched_bookings": len(unmatched_booking_ids),
+        "target_insight_rows": cab_delay_summary.target_insight_rows,
+        "existing_insight_rows": cab_delay_summary.existing_insight_rows,
+        "generated_insight_rows": cab_delay_summary.generated_insight_rows,
+        "failed_insight_rows": cab_delay_summary.failed_insight_rows,
+        "target_comment_summary_rows": cab_delay_summary.target_comment_summary_rows,
+        "existing_comment_summary_rows": cab_delay_summary.existing_comment_summary_rows,
+        "generated_comment_summary_rows": cab_delay_summary.generated_comment_summary_rows,
+        "failed_comment_summary_rows": cab_delay_summary.failed_comment_summary_rows,
+        "agent_total_cases": case_counts["total_cases"],
+        "agent_auto_ready_cases": case_counts["auto_ready"],
+        "agent_needs_review_cases": case_counts["needs_review"],
+        "agent_missing_evidence_cases": case_counts["missing_evidence"],
+        "agent_contradiction_cases": case_counts["contradiction"],
+        "agent_failed_cases": case_counts["failed"],
+        "needs_check_count": edit_counts["needs_check_count"],
+        "auto_approved_count": edit_counts["auto_approved_count"],
+        "edited_case_count": 0,
+        "excluded_case_count": 0,
+        "pending_human_reviews": 0,
+    }
+    return PipelineResult(
+        metrics=metrics,
         warnings=warnings,
-        active_llm_generator=active_llm_generator,
-        llm_concurrency_limit=llm_concurrency_limit,
-        on_step_start=on_step_start,
-        on_step_complete=on_step_complete,
+        category_outputs=finalized_category_outputs,
+        package_path=output_package_path,
+        manifest_path=manifest_path,
+        final_output_path=job_dir / FINAL_OUTPUT_FILENAME,
+        final_output={},
+        agent_audit_path=job_dir / AGENT_AUDIT_FILENAME,
+        review_queue_path=job_dir / REVIEW_QUEUE_FILENAME,
+        agent_summary_path=job_dir / AGENT_SUMMARY_FILENAME,
+        agent_summary={},
+        case_counts=case_counts,
+        agent_progress=agent_progress,
+        agent_cases=edit_cases,
+        awaiting_edit=True,
+        awaiting_review=False,
+        pending_interrupts=[],
         job_id=resolved_job_id,
     )
 
@@ -557,7 +553,7 @@ async def finalize_pipeline_package(
     )
 
 
-async def package_after_hitl(
+async def apply_edits_and_package(
     *,
     job_dir: Path,
     output_package_path: Path,
@@ -569,26 +565,50 @@ async def package_after_hitl(
     job_id: str,
     on_event: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
-    """Build final XLSX / audit / ZIP after all LangGraph HITL interrupts are cleared."""
+    """Apply edit outcomes, rewrite processed XLSX, then build portfolio + ZIP."""
+    applied_cases = apply_edit_outcomes(agent_cases)
+    cases_by_booking = {
+        str(case.get("booking_id") or "").strip(): case
+        for case in applied_cases
+        if str(case.get("booking_id") or "").strip()
+    }
+    exclude_ids = excluded_booking_ids(applied_cases)
+
     processed_frames: list[pd.DataFrame] = []
+    updated_category_outputs: list[dict[str, Any]] = []
     for category in category_outputs:
         processed_name = str(category.get("processed_filename") or "").strip()
         if not processed_name:
+            updated_category_outputs.append(category)
             continue
         processed_path = job_dir / processed_name
         if not processed_path.exists() or processed_path.stat().st_size == 0:
+            updated_category_outputs.append(category)
             continue
-        processed_frames.append(await asyncio.to_thread(pd.read_excel, processed_path))
+        frame = await asyncio.to_thread(pd.read_excel, processed_path)
+        patched = apply_case_edits_to_processed_frame(frame, cases_by_booking)
+        await asyncio.to_thread(write_workbook, patched, processed_path)
+        processed_frames.append(patched)
+        updated = dict(category)
+        updated["row_count"] = len(patched)
+        updated["output_columns"] = patched.columns.tolist()
+        updated_category_outputs.append(updated)
 
+    portfolio_cases = cases_for_portfolio(applied_cases)
     agent_summary = await run_portfolio_for_job(
         job_id=job_id,
-        cases=agent_cases,
+        cases=portfolio_cases,
         llm_generator=None,
         llm_concurrency=1,
         on_event=on_event,
     )
-    case_counts = build_case_counts(agent_cases)
-    agent_progress = build_agent_progress(agent_cases, agent_summary=agent_summary)
+    # Persist edit metrics onto the summary for UI KPIs (portfolio already may include them).
+    agent_summary = {
+        **agent_summary,
+        **edit_metrics(applied_cases),
+    }
+    case_counts = build_case_counts(applied_cases)
+    agent_progress = build_agent_progress(applied_cases, agent_summary=agent_summary)
 
     final_output_path = job_dir / FINAL_OUTPUT_FILENAME
     agent_audit_path = job_dir / AGENT_AUDIT_FILENAME
@@ -596,10 +616,10 @@ async def package_after_hitl(
     agent_summary_path = job_dir / AGENT_SUMMARY_FILENAME
     manifest_path = job_dir / MANIFEST_FILENAME
 
-    final_output_df = build_final_output_dataframe(processed_frames)
+    final_output_df = build_final_output_dataframe(processed_frames, exclude_booking_ids=exclude_ids)
     await asyncio.to_thread(write_workbook, final_output_df, final_output_path)
-    await asyncio.to_thread(write_workbook, build_agent_audit_dataframe(agent_cases), agent_audit_path)
-    await asyncio.to_thread(write_workbook, build_review_queue_dataframe(agent_cases), review_queue_path)
+    await asyncio.to_thread(write_workbook, build_agent_audit_dataframe(applied_cases), agent_audit_path)
+    await asyncio.to_thread(write_workbook, build_review_queue_dataframe(applied_cases), review_queue_path)
     await asyncio.to_thread(
         agent_summary_path.write_text,
         json.dumps(agent_summary, indent=2, ensure_ascii=False),
@@ -615,14 +635,14 @@ async def package_after_hitl(
         "review_queue": review_queue_path.relative_to(job_dir).as_posix(),
         "agent_summary": agent_summary_path.relative_to(job_dir).as_posix(),
     }
-    prepared_rows = int(metrics.get("prepared_rows") or sum(int(c.get("row_count") or 0) for c in category_outputs))
+    prepared_rows = int(metrics.get("prepared_rows") or sum(int(c.get("row_count") or 0) for c in updated_category_outputs))
     raw_rows = int(metrics.get("raw_rows") or prepared_rows)
     manifest = build_manifest(
         start_date=start_date,
         end_date=end_date,
         raw_rows=raw_rows,
         prepared_rows=prepared_rows,
-        categories=category_outputs,
+        categories=updated_category_outputs,
         final_output=final_output,
         agent_summary=agent_summary,
         agent_artifacts=agent_artifacts,
@@ -632,15 +652,16 @@ async def package_after_hitl(
         write_package_zip,
         output_package_path=output_package_path,
         manifest_path=manifest_path,
-        categories=category_outputs,
+        categories=updated_category_outputs,
         final_output_path=final_output_path,
         root_dir=job_dir,
         agent_artifact_paths=[agent_audit_path, review_queue_path, agent_summary_path],
     )
 
+    edit_counts = edit_metrics(applied_cases)
     updated_metrics = {
         **metrics,
-        "category_count": len(category_outputs),
+        "category_count": len(updated_category_outputs),
         "final_output_rows": len(final_output_df),
         "agent_total_cases": case_counts["total_cases"],
         "agent_auto_ready_cases": case_counts["auto_ready"],
@@ -651,11 +672,15 @@ async def package_after_hitl(
         "agent_total_recoverable_amount": agent_summary.get("total_recoverable_amount", 0),
         "agent_high_confidence_cases": agent_summary.get("high_confidence_case_count", 0),
         "agent_high_confidence_recoverable_amount": agent_summary.get("high_confidence_recoverable_amount", 0),
+        "edited_case_count": edit_counts["edited_case_count"],
+        "excluded_case_count": edit_counts["excluded_case_count"],
+        "needs_check_count": edit_counts["needs_check_count"],
+        "auto_approved_count": edit_counts["auto_approved_count"],
         "pending_human_reviews": 0,
     }
     return {
         "metrics": updated_metrics,
-        "category_outputs": category_outputs,
+        "category_outputs": updated_category_outputs,
         "package_path": output_package_path,
         "final_output_path": final_output_path,
         "final_output": final_output,
@@ -665,8 +690,34 @@ async def package_after_hitl(
         "agent_summary": agent_summary,
         "case_counts": case_counts,
         "agent_progress": agent_progress,
-        "agent_cases": agent_cases,
+        "agent_cases": applied_cases,
     }
+
+
+async def package_after_hitl(
+    *,
+    job_dir: Path,
+    output_package_path: Path,
+    start_date: str,
+    end_date: str,
+    category_outputs: list[dict[str, Any]],
+    agent_cases: list[dict[str, Any]],
+    metrics: dict[str, Any],
+    job_id: str,
+    on_event: Callable[[dict[str, Any]], Any] | None = None,
+) -> dict[str, Any]:
+    """Backward-compatible alias — production packaging goes through apply_edits_and_package."""
+    return await apply_edits_and_package(
+        job_dir=job_dir,
+        output_package_path=output_package_path,
+        start_date=start_date,
+        end_date=end_date,
+        category_outputs=category_outputs,
+        agent_cases=agent_cases,
+        metrics=metrics,
+        job_id=job_id,
+        on_event=on_event,
+    )
 
 
 def positive_int(explicit_value: int | None, *, env_name: str, default: int) -> int:

@@ -23,22 +23,29 @@ def count_cases(cases: list[dict[str, Any]], predicate) -> int:
     return sum(1 for case in cases if predicate(case))
 
 
+def is_portfolio_omitted(case: dict[str, Any]) -> bool:
+    if case.get("_portfolio_omit") or case.get("excluded"):
+        return True
+    return clean_text(case.get("edit_outcome")) == "exclude"
+
+
 def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
     case_counts = build_case_counts(cases)
-    total_recoverable = sum(float(case.get("recoverable_amount") or 0) for case in cases)
+    ranked_cases = [case for case in cases if not is_portfolio_omitted(case)]
+    total_recoverable = sum(float(case.get("recoverable_amount") or 0) for case in ranked_cases)
     high_confidence_case_count = count_cases(
-        cases,
+        ranked_cases,
         lambda case: (case.get("final_decision") or {}).get("confidence", 0) >= 0.85,
     )
     high_confidence_recoverable = sum(
         float(case.get("recoverable_amount") or 0)
-        for case in cases
+        for case in ranked_cases
         if (case.get("final_decision") or {}).get("confidence", 0) >= 0.85
     )
     category_totals: dict[str, dict[str, Any]] = defaultdict(lambda: {"category": "", "cases": 0, "recoverable": 0.0})
     missing_sources: Counter[str] = Counter()
 
-    for case in cases:
+    for case in ranked_cases:
         category = str(case.get("sub_category") or "Uncategorized")
         category_totals[category]["category"] = category
         category_totals[category]["cases"] += 1
@@ -61,7 +68,11 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         for title, count in missing_sources.most_common(5)
     ]
     recommended_actions = build_recommended_actions(case_counts, top_categories, missing_data_hotspots)
-    vendor_analysis = build_vendor_penalty_analysis(cases)
+    vendor_analysis = build_vendor_penalty_analysis(ranked_cases)
+    edited_case_count = sum(1 for case in cases if case.get("was_edited"))
+    excluded_case_count = sum(1 for case in cases if is_portfolio_omitted(case))
+    needs_check_count = sum(1 for case in cases if case.get("ai_bucket") == "needs_check")
+    auto_approved_count = sum(1 for case in cases if case.get("ai_bucket") == "auto_approved")
 
     return {
         "executive_summary": (
@@ -86,6 +97,10 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         **vendor_analysis,
         "missing_data_hotspots": missing_data_hotspots,
         "recommended_actions": recommended_actions,
+        "edited_case_count": edited_case_count,
+        "excluded_case_count": excluded_case_count,
+        "needs_check_count": needs_check_count,
+        "auto_approved_count": auto_approved_count,
     }
 
 
@@ -130,6 +145,8 @@ def build_vendor_penalty_analysis(cases: list[dict[str, Any]]) -> dict[str, Any]
     )
 
     for case in cases:
+        if is_portfolio_omitted(case):
+            continue
         vendor_name = clean_text(case.get("vendor_name")) or UNKNOWN_VENDOR_NAME
         subcategory = clean_text(case.get("sub_category")) or "Uncategorized"
         recoverable = clean_number(case.get("recoverable_amount"))

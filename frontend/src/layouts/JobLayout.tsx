@@ -1,5 +1,5 @@
 /**
- * JobLayout — stage stepper (Progress · Review · Outputs) + status + child page outlet.
+ * JobLayout — stage stepper (Progress · Edit · Review · Outputs) + status + child page outlet.
  * Locked stages use aria-disabled; soft unlock from job status flags via useJob().
  */
 import { Activity, ArrowLeft } from "lucide-react";
@@ -7,16 +7,24 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useJob } from "../context/JobProvider";
 
-type StageKey = "progress" | "review" | "outputs";
+type StageKey = "progress" | "edit" | "review" | "outputs";
 
 function stageDisabledReason(
   key: StageKey,
-  flags: { showAgentWorkspace: boolean; isComplete: boolean; hasFailed: boolean },
+  flags: {
+    showEditWorkspace: boolean;
+    showAgentWorkspace: boolean;
+    isComplete: boolean;
+    hasFailed: boolean;
+  },
 ): string | null {
   if (key === "progress") return null;
   if (flags.hasFailed) return "Job failed — start a new job";
+  if (key === "edit" && !flags.showEditWorkspace) {
+    return "Available after investigation finishes";
+  }
   if (key === "review" && !flags.showAgentWorkspace) {
-    return "Available after investigation reaches review or completion";
+    return "Available after you approve edits";
   }
   if (key === "outputs" && !flags.isComplete) {
     return "Available after the job succeeds";
@@ -31,6 +39,7 @@ export default function JobLayout() {
     isLoading,
     error,
     isComplete,
+    showEditWorkspace,
     showAgentWorkspace,
     hasFailed,
   } = useJob();
@@ -72,9 +81,10 @@ export default function JobLayout() {
     );
   }
 
-  const flags = { showAgentWorkspace, isComplete, hasFailed };
+  const flags = { showEditWorkspace, showAgentWorkspace, isComplete, hasFailed };
   const stages: { key: StageKey; label: string; to: string }[] = [
     { key: "progress", label: "Progress", to: `/jobs/${jobId}` },
+    { key: "edit", label: "Edit", to: `/jobs/${jobId}/edit` },
     { key: "review", label: "Review", to: `/jobs/${jobId}/review` },
     { key: "outputs", label: "Outputs", to: `/jobs/${jobId}/outputs` },
   ];
