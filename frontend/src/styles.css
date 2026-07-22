@@ -169,6 +169,254 @@ h2 {
   color: #c7162b;
 }
 
+.statusPill[data-state="awaiting_review"] {
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.brandLink {
+  text-decoration: none;
+  color: inherit;
+}
+
+.brandLink:hover h1 {
+  color: var(--color-blue);
+}
+
+/* Multi-page shell: stage nav + one primary surface per route */
+.jobShell {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.jobStageBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(32, 41, 57, 0.04);
+}
+
+.jobStageNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.jobStageLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-muted);
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.jobStageLink:hover {
+  color: var(--color-strong);
+  background: var(--color-panel);
+}
+
+.jobStageLinkActive {
+  border-color: var(--color-blue-border);
+  background: var(--color-blue-soft);
+  color: var(--color-blue);
+}
+
+.jobStageLink[data-locked="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.jobStageMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.jobNewLink {
+  text-decoration: none;
+}
+
+.pageFrame {
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Page title above both cards so .workspace surfaces share one top edge */
+.newJobPageHeader {
+  margin: 0 0 14px;
+}
+
+.newJobPageHeader h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+
+.newJobPageHeader p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.newJobWorkspace .controlSurface,
+.newJobGuide {
+  margin: 0;
+  width: 100%;
+}
+
+.newJobStepList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.newJobStep {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius);
+  background: var(--color-panel);
+}
+
+.newJobStepIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-blue-border);
+  background: var(--color-blue-soft);
+  color: var(--color-blue);
+}
+
+.newJobStep strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-strong);
+  font-size: 0.92rem;
+}
+
+.newJobStep p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.progressPage,
+.outputsPage,
+.reviewPage {
+  display: grid;
+  gap: 18px;
+}
+
+.progressPage .processSurface {
+  max-width: none;
+  margin: 0;
+}
+
+.outputsPage .finalOutputSurface,
+.outputsPage .previewSurface {
+  max-width: none;
+  margin: 0;
+}
+
+.pageFrame .agentSurface {
+  max-width: none;
+  margin: 0;
+}
+
+.stageCta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-surface);
+}
+
+.stageCta[data-tone="warning"] {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-soft);
+}
+
+.stageCta[data-tone="success"] {
+  border-color: var(--color-green-border);
+  background: var(--color-green-soft);
+}
+
+.stageCta strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-strong);
+  font-size: 0.95rem;
+}
+
+.stageCta p {
+  color: var(--color-muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.stageCta .primaryButton {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+.pageEmpty,
+.pageEmptySurface {
+  justify-content: center;
+  gap: 12px;
+  min-height: 220px;
+  padding: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-surface);
+  flex-direction: column;
+  text-align: center;
+}
+
+.pageEmptySurface {
+  display: flex;
+}
+
+.pageEmptySurface strong,
+.pageEmpty strong {
+  color: var(--color-strong);
+}
+
+.pageEmptySurface p {
+  max-width: 420px;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(310px, 410px) minmax(0, 1fr);
@@ -2120,6 +2368,20 @@ h2 {
 @media (max-width: 1080px) {
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .jobStageBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .jobStageMeta {
+    justify-content: space-between;
+  }
+
+  .stageCta {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .agentGrid,

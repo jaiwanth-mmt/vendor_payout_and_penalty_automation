@@ -24,7 +24,7 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - Cab Delay adds timing + comments + Incabs insights/summaries when available.
 - Evidence tools may include tracking/vendor context; source-text alignment remains primary for auto-ready (`comments` → `Remarks` → mapped Sub Category). Booking-ID mismatch does not force HITL.
 - ZIP: `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, `agent_summary.json`, `category_files/prepared/*.xlsx`, `category_files/processed/*.xlsx`.
-- UI: Processing timeline has no package ZIP button; category preview downloads category Excels; case evidence and investigation graphs stay collapsed until revealed.
+- UI routes: `/` (upload) → `/jobs/:jobId` (progress) → `/jobs/:jobId/review` (HITL) → `/jobs/:jobId/outputs` (previews). Job session state lives in `JobProvider`; do not add a second poller on pages. Processing timeline has no package ZIP button; category preview downloads category Excels; case evidence and investigation graphs stay collapsed until revealed.
 - `data/demo/tracking_reports_by_booking.json` is reference-only; production uses live MySQL/Redash.
 
 ## Test Map

@@ -24,7 +24,7 @@ backend/app/
   integrations/     Azure LLM, MySQL tracking helpers, Redash, TrackingRepository
   services/         pipeline orchestration, package builder, job store
   cli/              help entrypoint only
-frontend/src/       upload UI, investigation stage progress, AgentCockpit (HITL + Mermaid)
+frontend/src/       multi-page UI (`/`, `/jobs/:id`, `/review`, `/outputs`); JobProvider + AgentCockpit
 data/demo/          sample workbook + reference tracking JSON (API does not read JSON for tracking)
 docs/langgraph.md   LangGraph contracts for coding agents
 docs/agent-playbook.md

@@ -1,94 +1,36 @@
-import { Activity } from "lucide-react";
+/**
+ * App — route table only. JobProvider wraps /jobs/:jobId so poll+SSE survive stage nav.
+ */
+import { Route, Routes } from "react-router-dom";
 
-import AgentCockpit from "./components/AgentCockpit";
-import CategoryPreview from "./components/CategoryPreview";
-import FinalOutputPreview from "./components/FinalOutputPreview";
-import ProcessingTimeline from "./components/ProcessingTimeline";
-import UploadPanel from "./components/UploadPanel";
-import { usePenaltyJob } from "./hooks/usePenaltyJob";
+import { JobProvider } from "./context/JobProvider";
+import AppShell from "./layouts/AppShell";
+import JobLayout from "./layouts/JobLayout";
+import JobOutputsPage from "./pages/JobOutputsPage";
+import JobProgressPage from "./pages/JobProgressPage";
+import JobReviewPage from "./pages/JobReviewPage";
+import NewJobPage from "./pages/NewJobPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
-function App() {
-  const {
-    selectedFile,
-    setSelectedFile,
-    startDate,
-    setStartDate,
-    endDate,
-    setEndDate,
-    job,
-    isProcessing,
-    isComplete,
-    isAwaitingReview,
-    showAgentWorkspace,
-    hasFailed,
-    error,
-    setError,
-    visibleMetrics,
-    graphEvents,
-    submitJob,
-    downloadFinalOutput,
-    downloadAgentAudit,
-    downloadReviewQueue,
-    downloadCategoryOutputs,
-    refreshJob
-  } = usePenaltyJob();
-
-  function handleFileSelect(file: File | null) {
-    setSelectedFile(file);
-    setError(null);
-  }
-
+export default function App() {
   return (
-    <main className="appShell">
-      <header className="topbar">
-        <div className="brandLockup">
-          <div className="brandMark" aria-hidden="true">
-            <span />
-            <span />
-          </div>
-          <div>
-            <p className="eyebrow">MakeMyTrip cab ops</p>
-            <h1>Agentic Loss Recovery Copilot</h1>
-          </div>
-        </div>
-        <div className="statusPill" data-state={job?.status ?? "idle"}>
-          <Activity size={16} />
-          <span>{job?.status ?? "ready"}</span>
-        </div>
-      </header>
-
-      <section className="workspace">
-        <UploadPanel
-          selectedFile={selectedFile}
-          startDate={startDate}
-          endDate={endDate}
-          isProcessing={isProcessing}
-          error={error}
-          onFileSelect={handleFileSelect}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          onSubmit={submitJob}
-        />
-        <ProcessingTimeline
-          job={job}
-          visibleMetrics={visibleMetrics}
-          graphEvents={graphEvents}
-          hasFailed={hasFailed}
-        />
-      </section>
-
-      <AgentCockpit
-        job={job}
-        isComplete={showAgentWorkspace}
-        isAwaitingReview={isAwaitingReview}
-        onDownloadAgentAudit={downloadAgentAudit}
-        onDownloadReviewQueue={downloadReviewQueue}
-        onRefreshJob={refreshJob}
-      />
-      <FinalOutputPreview job={job} isComplete={isComplete} onDownload={downloadFinalOutput} />
-      <CategoryPreview job={job} isComplete={isComplete} onDownload={downloadCategoryOutputs} />
-    </main>
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<NewJobPage />} />
+        <Route
+          path="jobs/:jobId"
+          element={
+            <JobProvider>
+              <JobLayout />
+            </JobProvider>
+          }
+        >
+          <Route index element={<JobProgressPage />} />
+          <Route path="review" element={<JobReviewPage />} />
+          <Route path="outputs" element={<JobOutputsPage />} />
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
   );
 }
-
-export default App;
