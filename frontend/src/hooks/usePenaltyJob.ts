@@ -165,11 +165,6 @@ export function usePenaltyJob() {
     }
   }, [endDate, fetchJobStatus, selectedFile, startDate]);
 
-  const downloadPackage = useCallback(() => {
-    if (!job?.download_ready) return;
-    window.location.href = apiUrl(`/api/jobs/${job.job_id}/download`);
-  }, [job]);
-
   const downloadFinalOutput = useCallback(() => {
     if (!job?.final_output?.download_ready) return;
     window.location.href = apiUrl(`/api/jobs/${job.job_id}/final-output/download`);
@@ -183,6 +178,11 @@ export function usePenaltyJob() {
   const downloadReviewQueue = useCallback(() => {
     if (job?.status !== "succeeded") return;
     window.location.href = apiUrl(`/api/jobs/${job.job_id}/review-queue/download`);
+  }, [job]);
+
+  const downloadCategoryOutputs = useCallback(() => {
+    if (job?.status !== "succeeded" || !(job.category_outputs?.length > 0)) return;
+    window.location.href = apiUrl(`/api/jobs/${job.job_id}/categories/download`);
   }, [job]);
 
   const refreshJob = useCallback(async () => {
@@ -208,10 +208,10 @@ export function usePenaltyJob() {
     visibleMetrics,
     graphEvents,
     submitJob,
-    downloadPackage,
     downloadFinalOutput,
     downloadAgentAudit,
     downloadReviewQueue,
+    downloadCategoryOutputs,
     refreshJob
   };
 }

@@ -279,6 +279,52 @@ def canonicalize_category(value: object) -> str:
     return _CANONICAL_BY_KEY.get(key, "")
 
 
+SIMILAR_CATEGORY_CUTOFF = 0.72
+
+
+def map_complaint_labels(value: object) -> list[str]:
+    """Map free-text labels to allowed categories via exact/alias keys, then strict similarity.
+
+    Does **not** fall back to Cab Delay when nothing matches.
+    """
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return []
+
+    mapped: list[str] = []
+    for part in split_category_text(text):
+        exact = canonicalize_category(part)
+        if exact:
+            mapped.append(exact)
+            continue
+        fuzzy = similar_allowed_category(part)
+        if fuzzy:
+            mapped.append(fuzzy)
+    if mapped:
+        return ordered_unique_categories(mapped)
+
+    # Whole-string pass (e.g. "FULFILLMENT NOT DONE" as one token).
+    exact = canonicalize_category(text)
+    if exact:
+        return [exact]
+    fuzzy = similar_allowed_category(text)
+    return [fuzzy] if fuzzy else []
+
+
+def similar_allowed_category(value: object) -> str:
+    normalized_value = normalize_category_key(value)
+    if not normalized_value:
+        return ""
+    choices = {normalize_category_key(category): category for category in ALLOWED_COMPLAINT_CATEGORIES}
+    # Also match against alias keys so near-misses like "fulfillment not doen" resolve.
+    alias_keys = list(_CANONICAL_BY_KEY.keys())
+    matches = difflib.get_close_matches(normalized_value, alias_keys, n=1, cutoff=SIMILAR_CATEGORY_CUTOFF)
+    if not matches:
+        matches = difflib.get_close_matches(normalized_value, list(choices), n=1, cutoff=SIMILAR_CATEGORY_CUTOFF)
+        return choices[matches[0]] if matches else ""
+    return _CANONICAL_BY_KEY[matches[0]]
+
+
 def categories_from_message(value: object) -> list[str]:
     text = "" if value is None else str(value).strip()
     if not text:

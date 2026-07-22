@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Download, ListChecks, LoaderCircle, Table2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ListChecks, LoaderCircle, Table2, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -19,7 +19,6 @@ type ProcessingTimelineProps = {
   visibleMetrics: VisibleMetric[];
   graphEvents?: GraphEvent[];
   hasFailed: boolean;
-  onDownload: () => void;
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -38,7 +37,6 @@ function ProcessingTimeline({
   visibleMetrics,
   graphEvents = [],
   hasFailed,
-  onDownload,
 }: ProcessingTimelineProps) {
   const summary = job?.investigation_summary ?? null;
   const technicalEvents = graphEvents.length ? graphEvents : job?.graph_events ?? [];
@@ -53,10 +51,6 @@ function ProcessingTimeline({
             <p>{job ? job.original_filename : "Awaiting workbook"}</p>
           </div>
         </div>
-        <button className="ghostButton" type="button" disabled={!job?.download_ready} onClick={onDownload}>
-          <Download size={18} />
-          <span>Download ZIP</span>
-        </button>
       </div>
 
       {job?.status === "awaiting_review" && (

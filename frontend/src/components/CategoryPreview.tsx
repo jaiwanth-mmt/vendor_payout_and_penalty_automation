@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Columns3, FileSpreadsheet, ListCollapse, LoaderCircle, Table2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Columns3, Download, FileSpreadsheet, ListCollapse, LoaderCircle, Table2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchCategoryPreview } from "../api/jobs";
@@ -9,6 +9,7 @@ import PaginationControls from "./PaginationControls";
 type CategoryPreviewProps = {
   job: JobResponse | null;
   isComplete: boolean;
+  onDownload: () => void;
 };
 
 const KEY_PREVIEW_COLUMNS = [
@@ -52,8 +53,9 @@ function renderPreviewValue(value: string | number | null | undefined): string {
   return String(value);
 }
 
-function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
+function CategoryPreview({ job, isComplete, onDownload }: CategoryPreviewProps) {
   const categories = useMemo(() => job?.category_outputs ?? [], [job?.category_outputs]);
+  const canDownload = Boolean(isComplete && categories.length > 0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [expandedCell, setExpandedCell] = useState<string | null>(null);
   const [showAllColumns, setShowAllColumns] = useState(false);
@@ -233,6 +235,15 @@ function CategoryPreview({ job, isComplete }: CategoryPreviewProps) {
             >
               {showAllColumns ? <ListCollapse size={16} /> : <Columns3 size={16} />}
               <span>{showAllColumns ? "Show key columns" : "Show all columns"}</span>
+            </button>
+            <button
+              className="ghostButton finalDownloadButton"
+              type="button"
+              disabled={!canDownload}
+              onClick={onDownload}
+            >
+              <Download size={17} />
+              <span>Download category Excels</span>
             </button>
           </div>
         )}

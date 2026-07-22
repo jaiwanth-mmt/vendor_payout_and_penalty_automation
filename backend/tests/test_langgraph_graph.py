@@ -91,7 +91,7 @@ def test_hitl_interrupt_and_resume() -> None:
         [
             {
                 "Booking ID": "NC1111111",
-                "Sub Category": "Cab Delay",
+                "Sub Category": "ZZZ_UNKNOWN_LABEL_XYZ",
                 "Remarks": "",
                 "Recoverable": 50,
                 "comments": "",
@@ -130,7 +130,7 @@ def test_hitl_interrupt_and_resume() -> None:
     asyncio.run(run())
 
 
-def test_investigation_without_hitl_completes_missing_evidence() -> None:
+def test_investigation_without_hitl_completes_subcategory_only() -> None:
     df = pd.DataFrame(
         [
             {
@@ -155,5 +155,6 @@ def test_investigation_without_hitl_completes_missing_evidence() -> None:
         )
     )
     assert cases[0]["pending_interrupt"] is False
-    assert cases[0]["review_status"] == "missing_evidence"
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "sub_category"
     assert any(call["name"] == "get_tracking_context" for call in cases[0].get("tool_calls", []))

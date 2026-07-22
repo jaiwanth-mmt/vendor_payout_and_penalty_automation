@@ -440,6 +440,10 @@ h2 {
   padding: 0 12px;
 }
 
+.previewActions .finalDownloadButton {
+  min-width: 210px;
+}
+
 .dropZone {
   min-height: 172px;
   display: grid;
@@ -1932,6 +1936,92 @@ h2 {
   font-size: 0.86rem;
 }
 
+.evidenceColumnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.evidenceColumnHeader h4 {
+  margin: 0;
+}
+
+.evidenceRevealButton,
+.graphRevealButton {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.evidenceTeaser,
+.evidenceEmpty {
+  border: 1px dashed #d0d5dd;
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.evidenceEmpty {
+  color: #667085;
+  font-size: 0.82rem;
+}
+
+.evidenceTeaser p {
+  margin: 0 0 10px;
+  color: #475467;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.evidenceTeaserList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidenceTeaserList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #edf1f7;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--color-surface);
+}
+
+.evidenceTeaserList strong,
+.evidenceTeaserList em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidenceTeaserList strong {
+  color: #344054;
+  font-size: 0.8rem;
+}
+
+.evidenceTeaserList em {
+  color: #667085;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.evidenceTeaserMore {
+  justify-content: center;
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
 .evidenceList,
 .traceList {
   display: grid;
@@ -2034,7 +2124,8 @@ h2 {
 
   .agentGrid,
   .agentVendorSummary,
-  .caseColumns {
+  .caseColumns,
+  .graphTopologyGrid {
     grid-template-columns: 1fr;
   }
 
@@ -2249,6 +2340,42 @@ h2 {
   border: 1px solid var(--color-border-soft);
   border-radius: var(--radius);
   background: var(--color-panel);
+}
+
+.graphTopologyTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graphTopologyHint {
+  margin: 0.35rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.graphTopologyGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 0.75rem;
+}
+
+.graphTopologyCard {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.graphTopologyCard .agentPanelHeader {
+  margin-bottom: 0;
+}
+
+.graphTopologyCard .mermaidDiagram {
+  margin-top: 0.65rem;
 }
 
 .hitlRow {

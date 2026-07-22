@@ -580,6 +580,11 @@ class JobStore:
             path = self._get_job(job_id).get("review_queue_path")
             return Path(path) if path else None
 
+    def get_job_dir(self, job_id: str) -> Path | None:
+        with self._lock:
+            job_dir = self._get_job(job_id).get("job_dir")
+            return Path(job_dir) if job_dir else None
+
     def get_category_processed_path(self, job_id: str, slug: str) -> Path | None:
         with self._lock:
             job = self._get_job(job_id)

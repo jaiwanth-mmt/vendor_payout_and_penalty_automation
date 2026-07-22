@@ -5,7 +5,10 @@ import {
   Building2,
   ClipboardList,
   Download,
+  Eye,
+  EyeOff,
   LoaderCircle,
+  Network,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -95,6 +98,7 @@ function AgentCockpit({
   const [error, setError] = useState<string | null>(null);
   const [topology, setTopology] = useState<GraphTopology | null>(null);
   const [resumeBusy, setResumeBusy] = useState<string | null>(null);
+  const [showGraphs, setShowGraphs] = useState(false);
 
   const pendingInterrupts = job?.pending_interrupts ?? [];
 
@@ -114,6 +118,7 @@ function AgentCockpit({
     setActionPage(1);
     setError(null);
     setTopology(null);
+    setShowGraphs(false);
   }, [job?.job_id]);
 
   useEffect(() => {
@@ -412,17 +417,43 @@ function AgentCockpit({
       {topology?.case?.mermaid && (
         <div className="agentPanel graphTopologyPanel">
           <div className="agentPanelHeader">
-            <span>Case investigation graph</span>
-            <strong>{topology.case.nodes?.length ?? 0} nodes</strong>
+            <div className="graphTopologyTitle">
+              <Network size={16} aria-hidden="true" />
+              <span>Investigation graphs</span>
+            </div>
+            <button
+              aria-expanded={showGraphs}
+              className="ghostButton graphRevealButton"
+              type="button"
+              onClick={() => setShowGraphs((current) => !current)}
+            >
+              {showGraphs ? <EyeOff size={16} /> : <Eye size={16} />}
+              <span>{showGraphs ? "Hide graphs" : "View graphs"}</span>
+            </button>
           </div>
-          <MermaidDiagram chart={topology.case.mermaid} className="mermaidDiagram" />
-          {topology.portfolio?.mermaid && (
-            <>
-              <div className="agentPanelHeader">
-                <span>Portfolio graph</span>
+          {!showGraphs ? (
+            <p className="graphTopologyHint">
+              Case and portfolio LangGraph topology stay collapsed until you need them.
+            </p>
+          ) : (
+            <div className="graphTopologyGrid">
+              <div className="graphTopologyCard">
+                <div className="agentPanelHeader">
+                  <span>Case investigation graph</span>
+                  <strong>{topology.case.nodes?.length ?? 0} nodes</strong>
+                </div>
+                <MermaidDiagram chart={topology.case.mermaid} className="mermaidDiagram" />
               </div>
-              <MermaidDiagram chart={topology.portfolio.mermaid} className="mermaidDiagram" />
-            </>
+              {topology.portfolio?.mermaid && (
+                <div className="graphTopologyCard">
+                  <div className="agentPanelHeader">
+                    <span>Portfolio graph</span>
+                    <strong>{topology.portfolio.nodes?.length ?? 0} nodes</strong>
+                  </div>
+                  <MermaidDiagram chart={topology.portfolio.mermaid} className="mermaidDiagram" />
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -703,10 +734,12 @@ function CaseDrawer({
 }) {
   const [evidencePage, setEvidencePage] = useState(1);
   const [tracePage, setTracePage] = useState(1);
+  const [showFullEvidence, setShowFullEvidence] = useState(false);
 
   useEffect(() => {
     setEvidencePage(1);
     setTracePage(1);
+    setShowFullEvidence(false);
   }, [activeCase?.booking_id]);
 
   if (!activeCase && !isCasePageLoading) return null;
@@ -790,18 +823,40 @@ function CaseDrawer({
               </div>
             </div>
 
-            <div className="caseColumns">
-              <CaseListPanel
-                title="Evidence"
-                items={evidence}
-                page={evidencePage}
-                noun="evidence"
-                onPageChange={setEvidencePage}
-              >
-                {pagedEvidence.map((item) => (
-                  <EvidenceCard item={item} key={item.id} />
-                ))}
-              </CaseListPanel>
+            <div className="caseColumns" data-evidence-expanded={showFullEvidence}>
+              <div className="evidenceColumn">
+                <div className="evidenceColumnHeader">
+                  <h4>Evidence</h4>
+                  {evidence.length > 0 && (
+                    <button
+                      aria-expanded={showFullEvidence}
+                      className="ghostButton evidenceRevealButton"
+                      type="button"
+                      onClick={() => setShowFullEvidence((current) => !current)}
+                    >
+                      {showFullEvidence ? <EyeOff size={15} /> : <Eye size={15} />}
+                      <span>{showFullEvidence ? "Hide evidence" : "View full evidence"}</span>
+                    </button>
+                  )}
+                </div>
+                {evidence.length === 0 ? (
+                  <div className="evidenceEmpty">No evidence items for this case.</div>
+                ) : showFullEvidence ? (
+                  <CaseListPanel
+                    title=""
+                    items={evidence}
+                    page={evidencePage}
+                    noun="evidence"
+                    onPageChange={setEvidencePage}
+                  >
+                    {pagedEvidence.map((item) => (
+                      <EvidenceCard item={item} key={item.id} />
+                    ))}
+                  </CaseListPanel>
+                ) : (
+                  <EvidenceTeaser evidence={evidence} />
+                )}
+              </div>
               <CaseListPanel
                 title="Trace"
                 items={trace}
@@ -910,11 +965,11 @@ function CaseListPanel<T>({
 }) {
   return (
     <div>
-      <h4>{title}</h4>
-      <div className={title === "Evidence" ? "evidenceList" : "traceList"}>{children}</div>
+      {title ? <h4>{title}</h4> : null}
+      <div className={noun === "evidence" ? "evidenceList" : "traceList"}>{children}</div>
       {items.length > AGENT_PAGE_SIZE && (
         <PaginationControls
-          label={`${title} pagination`}
+          label={`${title || noun} pagination`}
           page={page}
           totalPages={pageCount(items.length)}
           itemCount={items.length}
@@ -923,6 +978,29 @@ function CaseListPanel<T>({
           onPageChange={onPageChange}
         />
       )}
+    </div>
+  );
+}
+
+function EvidenceTeaser({ evidence }: { evidence: EvidenceItem[] }) {
+  const previewItems = evidence.slice(0, 4);
+  const remaining = Math.max(0, evidence.length - previewItems.length);
+
+  return (
+    <div className="evidenceTeaser">
+      <p>
+        {evidence.length} evidence item{evidence.length === 1 ? "" : "s"} collected. Open the full
+        dossier for field-level detail.
+      </p>
+      <ul className="evidenceTeaserList">
+        {previewItems.map((item) => (
+          <li key={item.id}>
+            <strong>{item.title}</strong>
+            <em>{item.source}</em>
+          </li>
+        ))}
+        {remaining > 0 && <li className="evidenceTeaserMore">+{remaining} more</li>}
+      </ul>
     </div>
   );
 }

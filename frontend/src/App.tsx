@@ -26,10 +26,10 @@ function App() {
     visibleMetrics,
     graphEvents,
     submitJob,
-    downloadPackage,
     downloadFinalOutput,
     downloadAgentAudit,
     downloadReviewQueue,
+    downloadCategoryOutputs,
     refreshJob
   } = usePenaltyJob();
 
@@ -74,7 +74,6 @@ function App() {
           visibleMetrics={visibleMetrics}
           graphEvents={graphEvents}
           hasFailed={hasFailed}
-          onDownload={downloadPackage}
         />
       </section>
 
@@ -87,7 +86,7 @@ function App() {
         onRefreshJob={refreshJob}
       />
       <FinalOutputPreview job={job} isComplete={isComplete} onDownload={downloadFinalOutput} />
-      <CategoryPreview job={job} isComplete={isComplete} />
+      <CategoryPreview job={job} isComplete={isComplete} onDownload={downloadCategoryOutputs} />
     </main>
   );
 }

@@ -19,11 +19,12 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - JobResponse includes `start_date`, `end_date` (not `approval_date`).
 - Job statuses: `queued` | `running` | `awaiting_review` | `succeeded` | `failed`.
 - LangGraph visibility: `investigation_summary` (primary), `agent_progress`, `pending_interrupts`, `graph_topology`; `graph_events` for collapsed technical detail only.
-- Endpoints: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`.
+- Endpoints: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`, `GET /api/jobs/{id}/categories/download` (ZIP of all category prepared/processed XLSX).
 - Every processed workbook includes shared tracking fields, `message`, and agent metadata columns.
 - Cab Delay adds timing + comments + Incabs insights/summaries when available.
-- Evidence tools may include tracking/vendor context; source-text alignment remains primary for auto-ready.
+- Evidence tools may include tracking/vendor context; source-text alignment remains primary for auto-ready (`comments` → `Remarks` → mapped Sub Category). Booking-ID mismatch does not force HITL.
 - ZIP: `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, `agent_summary.json`, `category_files/prepared/*.xlsx`, `category_files/processed/*.xlsx`.
+- UI: Processing timeline has no package ZIP button; category preview downloads category Excels; case evidence and investigation graphs stay collapsed until revealed.
 - `data/demo/tracking_reports_by_booking.json` is reference-only; production uses live MySQL/Redash.
 
 ## Test Map

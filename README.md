@@ -91,9 +91,9 @@ When the job is `awaiting_review`:
 
 1. Open **Agentic Loss Recovery Copilot** (Agent cockpit)
 2. Approve or keep cases in **LangGraph human review**
-3. After the last interrupt clears, packaging runs and the final XLSX / ZIP become available
+3. After the last interrupt clears, packaging runs and the final XLSX / category Excels become available
 
-The processing timeline shows calm **investigation stage progress**. Raw LangGraph SSE events stay in a collapsed technical log.
+The processing timeline shows calm **investigation stage progress**. Raw LangGraph SSE events stay in a collapsed technical log. Case evidence and investigation graphs stay collapsed until revealed in Agent cockpit. Download category Excels from **Category preview**.
 
 ## LangGraph visibility APIs
 
@@ -102,6 +102,7 @@ The processing timeline shows calm **investigation stage progress**. Raw LangGra
 | `GET /api/jobs/{id}` | Job snapshot including `investigation_summary`, `pending_interrupts`, short `graph_events` |
 | `GET /api/jobs/{id}/events` | SSE stream of node/tool/interrupt events |
 | `GET /api/jobs/{id}/graph` | Mermaid topology for case + portfolio graphs |
+| `GET /api/jobs/{id}/categories/download` | ZIP of all category prepared/processed XLSX files |
 | `GET /api/jobs/{id}/interrupts` | Pending HITL payloads |
 | `POST /api/jobs/{id}/cases/{booking_id}/resume` | Resume an interrupted case |
 
@@ -109,7 +110,7 @@ See [docs/langgraph.md](docs/langgraph.md) for topology, tools, and policy.
 
 ## Evidence policy
 
-Source-text alignment remains primary (`comments` → `Remarks`; Sub Category alone is missing evidence). LangGraph tools may also return tracking/vendor/fare context as **supporting** evidence. Judge guardrails still force review on missing text evidence, booking-id mismatch, and invalid-penalty language.
+Source-text alignment remains primary (`comments` → `Remarks` → **Sub Category when it maps** to an allowed complaint category). `Details Change` is treated as `Chauffeur/Vehicle Change`. When comments indicate Vendor No Show and/or Cab Delay family and the row is Cab Delay family or Fulfillment Not Done, the case auto-ready using **Remarks if present else Sub Category**. LangGraph tools may also return tracking/vendor/fare context as **supporting** evidence. Judge guardrails still force review on unmapped Sub Category-only rows and invalid-penalty language (booking-ID mismatch is **not** a review trigger).
 
 ## Tests
 
