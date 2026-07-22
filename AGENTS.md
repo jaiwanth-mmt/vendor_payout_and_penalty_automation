@@ -20,7 +20,7 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - `backend/app/integrations/tracking_reports.py`: MySQL fetch/prune/vendor join helpers (library only).
 - `backend/app/integrations/redash_call_comments.py`: Redash comment fetch (library only).
 - `backend/app/agents/`: **LangGraph investigation** — `graphs.py`, `runner.py`, `tools.py`, `nodes/`, `policy.py`, `state.py`, `langchain_model.py`, plus source alignment / portfolio helpers.
-- `frontend/src/`: React UI (date-range upload, calm investigation stage progress, collapsed technical event log, AgentCockpit HITL/topology with collapsed evidence + graphs, category Excel download).
+- `frontend/src/`: React multi-page UI — `/` upload (`useCreateJob`), `/jobs/:jobId` progress, `/jobs/:jobId/review` HITL, `/jobs/:jobId/outputs` downloads. `JobProvider`/`useJobSession` own poll+SSE across job routes. Agent cockpit under `components/agent/`.
 - `data/demo/`: reference workbook + reference tracking JSON shape (**API does not read tracking JSON**).
 - `docs/langgraph.md`: LangGraph topology, tools, HITL, streaming contracts for coding agents.
 - `docs/agent-playbook.md`: common AI-agent edit recipes.

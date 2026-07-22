@@ -1,7 +1,12 @@
+/**
+ * useJobSession — poll + SSE + downloads for one existing jobId.
+ * Used by JobProvider so Progress/Review/Outputs share one session.
+ * Does not own the upload form (see useCreateJob).
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { apiUrl, createJob, fetchJob, openJobEventStream } from "../api/jobs";
-import { DEFAULT_END_DATE, DEFAULT_START_DATE, METRIC_LABELS } from "../constants/pipeline";
+import { apiUrl, fetchJob, openJobEventStream } from "../api/jobs";
+import { METRIC_LABELS } from "../constants/pipeline";
 import type { GraphEvent, JobResponse, VisibleMetric } from "../types/jobs";
 
 function formatMetricValue(key: string, value: number | string): number | string {
@@ -18,28 +23,20 @@ function formatMetricValue(key: string, value: number | string): number | string
   return typeof value === "number" ? value.toLocaleString("en-IN") : value;
 }
 
-function isTerminalJob(job: JobResponse): boolean {
-  return job.status === "succeeded" || job.status === "failed";
-}
-
 function shouldStreamEvents(job: JobResponse | null): boolean {
   if (!job) return true;
   return job.status === "queued" || job.status === "running" || job.status === "awaiting_review";
 }
 
-export function usePenaltyJob() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
-  const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
+export function useJobSession(jobId: string | undefined) {
   const [job, setJob] = useState<JobResponse | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(Boolean(jobId));
   const [error, setError] = useState<string | null>(null);
   const [graphEvents, setGraphEvents] = useState<GraphEvent[]>([]);
   const pendingEventsRef = useRef<GraphEvent[]>([]);
   const flushTimerRef = useRef<number | null>(null);
 
-  const isProcessing = job?.status === "queued" || job?.status === "running" || isSubmitting;
+  const isProcessing = job?.status === "queued" || job?.status === "running";
   const isAwaitingReview = job?.status === "awaiting_review";
   const isComplete = job?.status === "succeeded";
   const hasFailed = job?.status === "failed";
@@ -55,36 +52,65 @@ export function usePenaltyJob() {
     return payload;
   }, []);
 
+  // Reset + attach when the URL jobId changes (deep link / navigation).
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId) {
+      setJob(null);
+      setGraphEvents([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setJob(null);
+    setGraphEvents([]);
+    pendingEventsRef.current = [];
+    setError(null);
+    setIsLoading(true);
+
+    fetchJobStatus(jobId)
+      .then(() => {
+        if (!isCancelled) setIsLoading(false);
+      })
+      .catch((loadError) => {
+        if (!isCancelled) {
+          setJob(null);
+          setError(loadError instanceof Error ? loadError.message : "Unable to load job");
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [fetchJobStatus, jobId]);
+
+  useEffect(() => {
+    if (!jobId || isLoading) return;
     // Keep polling through awaiting_review so Approve / Keep review updates the timeline.
-    if (job && isTerminalJob(job)) return;
+    if (job?.status === "succeeded" || job?.status === "failed") return;
+    if (error && !job?.job_id) return;
 
     let isCancelled = false;
     const poll = async () => {
       try {
-        const payload = await fetchJobStatus(jobId);
-        if (!isCancelled && isTerminalJob(payload)) {
-          setIsSubmitting(false);
-        }
-        if (!isCancelled && payload.status === "awaiting_review") {
-          setIsSubmitting(false);
-        }
+        await fetchJobStatus(jobId);
+        if (!isCancelled) setError(null);
       } catch (pollError) {
         if (!isCancelled) {
           setError(pollError instanceof Error ? pollError.message : "Status polling failed");
-          setIsSubmitting(false);
         }
       }
     };
 
-    poll();
+    // Initial attach already fetched; interval continues while non-terminal.
     const timer = window.setInterval(poll, 900);
     return () => {
       isCancelled = true;
       window.clearInterval(timer);
     };
-  }, [fetchJobStatus, job?.status, jobId]);
+  }, [error, fetchJobStatus, isLoading, job?.job_id, job?.status, jobId]);
 
   useEffect(() => {
     if (!jobId || !shouldStreamEvents(job)) return;
@@ -128,42 +154,12 @@ export function usePenaltyJob() {
     const highConfidencePercentage = totalCases > 0 ? (highConfidenceCases / totalCases) * 100 : 0;
     const metricValues: Record<string, number | string> = {
       ...job.metrics,
-      agent_high_confidence_percentage: highConfidencePercentage
+      agent_high_confidence_percentage: highConfidencePercentage,
     };
     return Object.entries(METRIC_LABELS)
       .filter(([key]) => metricValues[key] !== undefined)
       .map(([key, label]) => ({ key, label, value: formatMetricValue(key, metricValues[key]) }));
   }, [job]);
-
-  const submitJob = useCallback(async () => {
-    if (!selectedFile) {
-      setError("Select a QlikSense Excel workbook first.");
-      return;
-    }
-    if (startDate > endDate) {
-      setError("Start date must be on or before end date.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-    setJob(null);
-    setJobId(null);
-    setGraphEvents([]);
-    pendingEventsRef.current = [];
-
-    try {
-      const payload = await createJob(selectedFile, startDate, endDate);
-      setJobId(payload.job_id);
-      const initialJob = await fetchJobStatus(payload.job_id);
-      if (isTerminalJob(initialJob) || initialJob.status === "awaiting_review") {
-        setIsSubmitting(false);
-      }
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Upload failed");
-      setIsSubmitting(false);
-    }
-  }, [endDate, fetchJobStatus, selectedFile, startDate]);
 
   const downloadFinalOutput = useCallback(() => {
     if (!job?.final_output?.download_ready) return;
@@ -191,13 +187,9 @@ export function usePenaltyJob() {
   }, [fetchJobStatus, jobId]);
 
   return {
-    selectedFile,
-    setSelectedFile,
-    startDate,
-    setStartDate,
-    endDate,
-    setEndDate,
+    jobId: jobId ?? null,
     job,
+    isLoading,
     isProcessing,
     isAwaitingReview,
     isComplete,
@@ -207,11 +199,12 @@ export function usePenaltyJob() {
     setError,
     visibleMetrics,
     graphEvents,
-    submitJob,
     downloadFinalOutput,
     downloadAgentAudit,
     downloadReviewQueue,
     downloadCategoryOutputs,
-    refreshJob
+    refreshJob,
   };
 }
+
+export type JobSessionValue = ReturnType<typeof useJobSession>;
