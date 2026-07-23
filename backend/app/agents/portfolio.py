@@ -73,6 +73,7 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
     excluded_case_count = sum(1 for case in cases if is_portfolio_omitted(case))
     needs_check_count = sum(1 for case in cases if case.get("ai_bucket") == "needs_check")
     auto_approved_count = sum(1 for case in cases if case.get("ai_bucket") == "auto_approved")
+    unhandled_count = sum(1 for case in cases if case.get("ai_bucket") == "unhandled")
 
     return {
         "executive_summary": (
@@ -101,6 +102,7 @@ def build_portfolio_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "excluded_case_count": excluded_case_count,
         "needs_check_count": needs_check_count,
         "auto_approved_count": auto_approved_count,
+        "unhandled_count": unhandled_count,
     }
 
 

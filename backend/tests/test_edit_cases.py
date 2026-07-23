@@ -10,6 +10,8 @@ import pandas as pd
 from backend.app.integrations.tracking import InMemoryTrackingRepository
 from backend.app.services.edit_cases import (
     apply_edit_outcomes,
+    distinct_edit_sub_categories,
+    filter_edit_cases,
     patch_edit_case,
     prepare_cases_for_edit,
 )
@@ -84,6 +86,78 @@ def test_apply_edit_outcomes_exclude_and_include() -> None:
     assert applied[1]["final_decision"]["recommended_recovery_amount"] == 0
 
 
+def test_filter_edit_cases_by_booking_bucket_and_sub_category() -> None:
+    cases = prepare_cases_for_edit(
+        [
+            {
+                "booking_id": "B1",
+                "sub_category": "Cab Delay",
+                "remarks": "",
+                "message": "msg",
+                "recoverable_amount": 100,
+                "review_status": "auto_ready",
+            },
+            {
+                "booking_id": "B2",
+                "sub_category": "Extra Money Taken",
+                "remarks": "",
+                "message": "msg",
+                "recoverable_amount": 50,
+                "review_status": "needs_review",
+            },
+            {
+                "booking_id": "B3",
+                "sub_category": "Cab Delay",
+                "remarks": "",
+                "message": "msg",
+                "recoverable_amount": 75,
+                "review_status": "needs_review",
+            },
+            {
+                "booking_id": "B4",
+                "sub_category": "Brand New Penalty Type",
+                "remarks": "",
+                "message": "msg",
+                "recoverable_amount": 40,
+                "review_status": "auto_ready",
+            },
+            {
+                "booking_id": "B5",
+                "sub_category": "Accidental Case",
+                "remarks": "",
+                "message": "Accident on the Way",
+                "recoverable_amount": 60,
+                "review_status": "needs_review",
+            },
+        ]
+    )
+
+    assert cases[0]["ai_bucket"] == "auto_approved"
+    assert cases[1]["ai_bucket"] == "needs_check"
+    assert cases[3]["ai_bucket"] == "unhandled"
+    assert cases[3]["edit_outcome"] == "needs_ops"
+    assert cases[4]["ai_bucket"] == "needs_check"
+
+    assert [case["booking_id"] for case in filter_edit_cases(cases, booking_id=" B2 ")] == ["B2"]
+    assert filter_edit_cases(cases, booking_id="missing") == []
+    assert [case["booking_id"] for case in filter_edit_cases(cases, sub_category="Cab Delay")] == ["B1", "B3"]
+    assert [
+        case["booking_id"]
+        for case in filter_edit_cases(
+            cases,
+            bucket="needs_check",
+            sub_category="Cab Delay",
+        )
+    ] == ["B3"]
+    assert [case["booking_id"] for case in filter_edit_cases(cases, bucket="unhandled")] == ["B4"]
+    assert distinct_edit_sub_categories(cases) == [
+        "Accidental Case",
+        "Brand New Penalty Type",
+        "Cab Delay",
+        "Extra Money Taken",
+    ]
+
+
 def test_process_pauses_for_edit_then_approve_packages(tmp_path: Path) -> None:
     workbook_path = tmp_path / "qliksense.xlsx"
     tracking_path = tmp_path / "tracking.json"
@@ -106,7 +180,7 @@ def test_process_pauses_for_edit_then_approve_packages(tmp_path: Path) -> None:
 
     assert result.awaiting_edit is True
     assert not package_path.exists()
-    assert result.agent_cases[0]["ai_bucket"] in {"needs_check", "auto_approved"}
+    assert result.agent_cases[0]["ai_bucket"] in {"needs_check", "auto_approved", "unhandled"}
     assert "edit_outcome" in result.agent_cases[0]
 
     edited = patch_edit_case(result.agent_cases[0], {"recoverable_amount": 175, "edit_outcome": "include"})

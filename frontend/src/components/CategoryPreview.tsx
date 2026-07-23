@@ -21,7 +21,7 @@ const KEY_PREVIEW_COLUMNS = [
   "Comments",
   "message",
 ];
-const NARRATIVE_COLUMN_MARKERS = ["comment", "insight", "message", "remark", "summary"];
+const NARRATIVE_COLUMN_MARKERS = ["comment", "message", "remark"];
 const EXPANDABLE_TEXT_LENGTH = 150;
 const CATEGORY_PAGE_SIZE = 5;
 

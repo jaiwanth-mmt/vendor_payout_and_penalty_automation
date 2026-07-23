@@ -10,7 +10,6 @@ from backend.app.domain.cab_delay_enrichment import (
     COMMENTS_COLUMN,
     DRIVER_ARRIVED_COLUMN,
     DRIVER_STARTED_COLUMN,
-    INCABS_INSIGHT_COLUMN,
     PREFERRED_START_TIME_IST_COLUMN,
     build_tracking_enrichment,
 )
@@ -19,7 +18,6 @@ from backend.app.domain.category_processors import (
     EXTRA_MONEY_TAKEN_OUTPUT_COLUMNS,
     FULFILLMENT_NOT_DONE_OUTPUT_COLUMNS,
     LOWER_CATEGORY_VEHICLE_OUTPUT_COLUMNS,
-    enrich_cab_delay_insights_async,
     enrich_lower_category_vehicle_async,
     enrich_message_column,
     enrich_message_column_async,
@@ -53,68 +51,6 @@ from backend.tests.factories import (
     write_tracking_json_with_lower_category,
     write_two_category_workbook,
 )
-
-
-def test_async_cab_delay_llm_generation_respects_concurrency_limit() -> None:
-    df = pd.DataFrame(
-        [
-            {
-                "Booking ID": f"B{index}",
-                "Booking Date": "2026-03-19",
-                "Booking Month": "Mar 2026",
-                "Loss Dept": "CARBD",
-                "Sub Category": "Cab Delay",
-                "Loss Amount": 100,
-                "Recoverable": 100,
-                "Remarks": "Cab Delay",
-            }
-            for index in range(1, 5)
-        ]
-    )
-    tracking_bookings = {
-        f"B{index}": {
-            "tracking_reports_raw": [
-                {
-                    "order_reference_number": f"B{index}",
-                    "start_time": "2026-03-19 04:30:00",
-                    "driver_started": "2026-03-19 10:20:00",
-                    "driver_arrived": "2026-03-19 10:40:00",
-                    "boarded": "2026-03-19 10:45:00",
-                }
-            ],
-            "comments": "",
-        }
-        for index in range(1, 5)
-    }
-    current_calls = 0
-    max_seen = 0
-    progress_updates: list[dict[str, int]] = []
-    token_budgets: list[int] = []
-
-    async def async_llm(_prompt: str, tokens: int, _effort: str) -> str:
-        nonlocal current_calls, max_seen
-        token_budgets.append(tokens)
-        current_calls += 1
-        max_seen = max(max_seen, current_calls)
-        await asyncio.sleep(0.01)
-        current_calls -= 1
-        return "Async insight."
-
-    async def run() -> None:
-        _output, summary = await enrich_cab_delay_insights_async(
-            df,
-            tracking_bookings=tracking_bookings,
-            llm_generator=async_llm,
-            llm_concurrency=2,
-            on_progress=lambda counters, _message: progress_updates.append(counters.copy()),
-        )
-        assert summary.generated_insight_rows == 4
-
-    asyncio.run(run())
-
-    assert max_seen == 2
-    assert token_budgets == [2048] * 4
-    assert progress_updates[-1]["generated_insight_rows"] == 4
 
 
 def test_async_message_classification_respects_concurrency_limit() -> None:
@@ -546,8 +482,6 @@ def test_extra_money_processor_adds_tracking_fields_without_cab_columns() -> Non
     assert outcome.df.loc[0, VENDOR_NAME_COLUMN] == "quickride"
     assert outcome.df.loc[0, "extra_travelled"] == 8.11
     assert outcome.df.loc[0, "comments"] == "Customer disputed extra cash collection."
-    assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
-    assert outcome.insight_summary is None
 
 
 def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insights() -> None:
@@ -598,8 +532,6 @@ def test_fulfillment_not_done_processor_adds_tracking_fields_without_cab_insight
     assert outcome.df.loc[0, FULFILLMENT_DRIVER_STARTED_COLUMN] == "19 Mar 2026 3:21:38 AM"
     assert outcome.df.loc[0, FULFILLMENT_DRIVER_ARRIVED_COLUMN] == "19 Mar 2026 3:21:44 AM"
     assert outcome.df.loc[0, MESSAGE_COLUMN] == "Vendor No Show"
-    assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
-    assert outcome.insight_summary is None
 
 
 def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_cab_insights() -> None:
@@ -648,8 +580,6 @@ def test_lower_category_vehicle_processor_adds_tracking_and_llm_fields_without_c
     assert outcome.df.loc[0, CUSTOMER_BOOKED_VEHICLE_COLUMN] == "electric sedan"
     assert outcome.df.loc[0, CUSTOMER_RECEIVED_VEHICLE_COLUMN] == "CNG hatchback"
     assert outcome.df.loc[0, MESSAGE_COLUMN] == "Low Category Vehicle"
-    assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
-    assert outcome.insight_summary is None
     assert outcome.warnings == []
 
 
@@ -713,5 +643,3 @@ def test_other_category_processors_add_common_tracking_amount_fields() -> None:
     assert outcome.df.loc[0, "total_driver_charge"] == 30
     assert outcome.df.loc[0, COMMENTS_COLUMN] == "Customer reported the driver behaved rudely."
     assert outcome.df.loc[0, MESSAGE_COLUMN] == "Bad Driver Behaviour/Skill"
-    assert INCABS_INSIGHT_COLUMN not in outcome.df.columns
-    assert outcome.insight_summary is None

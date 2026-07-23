@@ -16,15 +16,15 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 
 ## Output Contracts
 
-- Create job form: `file`, `start_date`, `end_date` (inclusive `Approval/Rejected DateTime` range).
-- JobResponse includes `start_date`, `end_date` (not `approval_date`).
+- Create job form: `file`, plus either `start_date`/`end_date` (inclusive `Approval/Rejected DateTime` range) or `process_all=true` (skip date filter).
+- JobResponse includes `start_date`, `end_date`, `process_all`.
 - Job statuses: `queued` | `running` | `awaiting_edit` | `awaiting_review` (legacy) | `succeeded` | `failed`.
 - LangGraph visibility: `investigation_summary` (primary), `agent_progress`, `graph_topology`; `graph_events` for collapsed technical detail only.
-- Edit endpoints: `GET /api/jobs/{id}/edit-cases`, `PATCH /api/jobs/{id}/edit-cases/{booking_id}`, `POST /api/jobs/{id}/approve-edits`.
+- Edit endpoints: `GET /api/jobs/{id}/edit-cases` (optional `booking_id`, `sub_category`, `bucket`, `page`), `PATCH /api/jobs/{id}/edit-cases/{booking_id}`, `POST /api/jobs/{id}/approve-edits`.
 - Legacy HITL (tests): `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`.
 - Also: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/categories/download`.
 - Every processed workbook includes shared tracking fields, `message`, and agent metadata columns.
-- Cab Delay adds timing + comments + Incabs insights/summaries when available.
+- Cab Delay adds timing + comments when available.
 - Evidence tools may include tracking/vendor context; source-text alignment remains primary for auto-ready (`comments` → `Remarks` → mapped Sub Category).
 - ZIP: `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, `agent_summary.json`, `category_files/prepared/*.xlsx`, `category_files/processed/*.xlsx`.
 - UI routes: `/` → `/jobs/:jobId` (progress) → `/jobs/:jobId/edit` → `/jobs/:jobId/review` (analysis) → `/jobs/:jobId/outputs`. Job session state lives in `JobProvider`.
@@ -36,7 +36,8 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - `test_edit_cases.py`: edit snapshot/patch/outcomes + exclude packaging.
 - `test_api.py`: HTTP job lifecycle; monkeypatch `live_tracking_repository_from_env`.
 - `test_category_processors.py`: registry enrichers + LLM concurrency.
-- `test_package_builder.py`: manifest/ZIP schemas (`start_date`/`end_date`).
+- `test_package_builder.py`: manifest/ZIP schemas (`start_date`/`end_date`/`process_all`).
+- `test_penalty_dataset.py`: approval datetime parsing (day-first + time strip) and range filter.
 - `test_agent_llm.py`: prompts/decisions/portfolio (compat wrappers over LangGraph nodes).
 - `test_langgraph_graph.py`: graph compile, tools, HITL interrupt/resume (`enable_hitl=True`).
 - `factories.py`: shared workbook/tracking fixtures.

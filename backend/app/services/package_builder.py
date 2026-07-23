@@ -217,10 +217,12 @@ def build_manifest(
     final_output: dict[str, Any],
     agent_summary: dict[str, Any] | None = None,
     agent_artifacts: dict[str, str] | None = None,
+    process_all: bool = False,
 ) -> dict[str, Any]:
     return {
         "start_date": start_date,
         "end_date": end_date,
+        "process_all": process_all,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "raw_rows": raw_rows,
         "prepared_rows": prepared_rows,

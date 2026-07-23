@@ -1,6 +1,7 @@
 import type {
   AgentCase,
   AgentCasesResponse,
+  AiBucket,
   CategoryPreviewResponse,
   CreateJobResponse,
   EditCaseItem,
@@ -105,13 +106,22 @@ export async function fetchAgentCase(jobId: string, bookingId: string): Promise<
 export async function fetchEditCases(
   jobId: string,
   page: number,
-  bucket?: "needs_check" | "auto_approved"
+  bucket?: AiBucket,
+  options?: { bookingId?: string; subCategory?: string }
 ): Promise<EditCasesPageResponse> {
   const searchParams = new URLSearchParams({
     page: String(page)
   });
   if (bucket) {
     searchParams.set("bucket", bucket);
+  }
+  const trimmedBookingId = options?.bookingId?.trim();
+  if (trimmedBookingId) {
+    searchParams.set("booking_id", trimmedBookingId);
+  }
+  const trimmedSubCategory = options?.subCategory?.trim();
+  if (trimmedSubCategory) {
+    searchParams.set("sub_category", trimmedSubCategory);
   }
   const response = await fetch(apiUrl(`/api/jobs/${jobId}/edit-cases?${searchParams.toString()}`));
   if (!response.ok) {
@@ -189,11 +199,15 @@ export async function createJob(
   file: File,
   startDate: string,
   endDate: string,
+  processAll = false,
 ): Promise<CreateJobResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("start_date", startDate);
-  formData.append("end_date", endDate);
+  formData.append("process_all", processAll ? "true" : "false");
+  if (!processAll) {
+    formData.append("start_date", startDate);
+    formData.append("end_date", endDate);
+  }
 
   const response = await fetch(apiUrl("/api/jobs"), {
     method: "POST",

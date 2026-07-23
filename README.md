@@ -4,7 +4,7 @@ React + FastAPI app that turns a QlikSense loss-recovery workbook into a Cab Ops
 
 For each job it:
 
-1. Filters Excel rows by an **approval date range** (`Approval/Rejected DateTime`)
+1. Filters Excel rows by an **approval date range** (`Approval/Rejected DateTime`), or processes the **entire workbook** when `process_all` is set
 2. Keeps CARBD rows with non-zero Recoverable, consolidates duplicate Booking IDs
 3. Fetches **live** tracking for those Booking IDs (`order_reference_number` in MySQL)
 4. Looks up **vendor names** from `incabs_suppliers`

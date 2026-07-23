@@ -2,11 +2,12 @@
  * JobEditPage — human edit workspace before portfolio / Review.
  * Editable while awaiting_edit and after success (re-edit + re-approve updates numbers).
  */
-import { ArrowRight, CheckCircle2, Clock3, LoaderCircle, PencilLine } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, Clock3, LoaderCircle, PencilLine, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { approveEdits, fetchEditCases, patchEditCase } from "../api/jobs";
+import BookingSearchForm from "../components/BookingSearchForm";
 import EditCaseCard from "../components/EditCaseCard";
 import PaginationControls from "../components/PaginationControls";
 import { useJob } from "../context/JobProvider";
@@ -19,14 +20,26 @@ export default function JobEditPage() {
   const navigate = useNavigate();
   const [needsCheckPage, setNeedsCheckPage] = useState(1);
   const [autoPage, setAutoPage] = useState(1);
+  const [unhandledPage, setUnhandledPage] = useState(1);
   const [needsCheckCases, setNeedsCheckCases] = useState<EditCaseItem[]>([]);
   const [autoCases, setAutoCases] = useState<EditCaseItem[]>([]);
+  const [unhandledCases, setUnhandledCases] = useState<EditCaseItem[]>([]);
   const [needsCheckTotalPages, setNeedsCheckTotalPages] = useState(1);
   const [autoTotalPages, setAutoTotalPages] = useState(1);
+  const [unhandledTotalPages, setUnhandledTotalPages] = useState(1);
+  const [needsCheckFilteredCount, setNeedsCheckFilteredCount] = useState(0);
+  const [autoFilteredCount, setAutoFilteredCount] = useState(0);
+  const [unhandledFilteredCount, setUnhandledFilteredCount] = useState(0);
   const [needsCheckCount, setNeedsCheckCount] = useState(0);
   const [autoCount, setAutoCount] = useState(0);
+  const [unhandledCount, setUnhandledCount] = useState(0);
   const [editedCount, setEditedCount] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
+  const [availableSubCategories, setAvailableSubCategories] = useState<string[]>([]);
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState("");
+  const [subCategoryFilter, setSubCategoryFilter] = useState("");
+  const [autoExpanded, setAutoExpanded] = useState(false);
   const [pendingSaves, setPendingSaves] = useState(0);
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -34,24 +47,40 @@ export default function JobEditPage() {
 
   const canEdit = (isAwaitingEdit || isComplete) && !approving;
   const isReApprove = isComplete;
+  const hasActiveFilters = Boolean(activeSearch || subCategoryFilter);
+  const filteredMatchCount = needsCheckFilteredCount + autoFilteredCount + unhandledFilteredCount;
 
   const loadBucket = useCallback(
     async (bucket: AiBucket, page: number) => {
       if (!jobId) return;
-      const payload = await fetchEditCases(jobId, page, bucket);
+      const payload = await fetchEditCases(jobId, page, bucket, {
+        bookingId: activeSearch,
+        subCategory: subCategoryFilter,
+      });
       if (bucket === "needs_check") {
         setNeedsCheckCases(payload.cases);
         setNeedsCheckTotalPages(payload.total_pages);
+        setNeedsCheckFilteredCount(payload.case_count);
         setNeedsCheckCount(payload.needs_check_count);
-      } else {
+      } else if (bucket === "auto_approved") {
         setAutoCases(payload.cases);
         setAutoTotalPages(payload.total_pages);
+        setAutoFilteredCount(payload.case_count);
         setAutoCount(payload.auto_approved_count);
+      } else {
+        setUnhandledCases(payload.cases);
+        setUnhandledTotalPages(payload.total_pages);
+        setUnhandledFilteredCount(payload.case_count);
+        setUnhandledCount(payload.unhandled_count);
       }
       setEditedCount(payload.edited_case_count);
       setExcludedCount(payload.excluded_case_count);
+      setAvailableSubCategories(payload.available_sub_categories ?? []);
+      setNeedsCheckCount(payload.needs_check_count);
+      setAutoCount(payload.auto_approved_count);
+      setUnhandledCount(payload.unhandled_count);
     },
-    [jobId],
+    [activeSearch, jobId, subCategoryFilter],
   );
 
   const reloadAll = useCallback(async () => {
@@ -59,24 +88,56 @@ export default function JobEditPage() {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadBucket("needs_check", needsCheckPage), loadBucket("auto_approved", autoPage)]);
+      await Promise.all([
+        loadBucket("needs_check", needsCheckPage),
+        loadBucket("auto_approved", autoPage),
+        loadBucket("unhandled", unhandledPage),
+      ]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load edit cases");
     } finally {
       setLoading(false);
     }
-  }, [autoPage, jobId, loadBucket, needsCheckPage, showEditWorkspace]);
+  }, [autoPage, jobId, loadBucket, needsCheckPage, showEditWorkspace, unhandledPage]);
 
   useEffect(() => {
     void reloadAll();
   }, [reloadAll]);
+
+  function handleSearch() {
+    const trimmedSearch = searchInput.trim();
+    setSearchInput(trimmedSearch);
+    setActiveSearch(trimmedSearch);
+    setNeedsCheckPage(1);
+    setAutoPage(1);
+    setUnhandledPage(1);
+  }
+
+  function handleClearSearch() {
+    setSearchInput("");
+    setActiveSearch("");
+    setNeedsCheckPage(1);
+    setAutoPage(1);
+    setUnhandledPage(1);
+  }
+
+  function handleSubCategoryChange(nextValue: string) {
+    setSubCategoryFilter(nextValue);
+    setNeedsCheckPage(1);
+    setAutoPage(1);
+    setUnhandledPage(1);
+  }
 
   async function handleSave(bookingId: string, patch: PatchEditCaseRequest) {
     if (!jobId || !canEdit) return;
     setPendingSaves((count) => count + 1);
     try {
       await patchEditCase(jobId, bookingId, patch);
-      await Promise.all([loadBucket("needs_check", needsCheckPage), loadBucket("auto_approved", autoPage)]);
+      await Promise.all([
+        loadBucket("needs_check", needsCheckPage),
+        loadBucket("auto_approved", autoPage),
+        loadBucket("unhandled", unhandledPage),
+      ]);
       await refreshJob();
     } finally {
       setPendingSaves((count) => Math.max(0, count - 1));
@@ -131,11 +192,46 @@ export default function JobEditPage() {
         </div>
         <div className="editSummaryChips">
           <span>{needsCheckCount} need your check</span>
+          <span>{unhandledCount} unique categories</span>
           <span>{autoCount} AI auto-approved</span>
           <span>{editedCount} edited</span>
           <span>{excludedCount} excluded</span>
         </div>
       </header>
+
+      <div className="editToolbar">
+        <BookingSearchForm
+          inputId="edit-booking-search"
+          value={searchInput}
+          placeholder="Search booking ID"
+          disabled={loading || approving}
+          isActive={Boolean(activeSearch)}
+          onValueChange={setSearchInput}
+          onSearch={handleSearch}
+          onClear={handleClearSearch}
+        />
+        <div className="editSubcategoryFilter">
+          <label htmlFor="edit-subcategory-filter">Sub category</label>
+          <select
+            id="edit-subcategory-filter"
+            value={subCategoryFilter}
+            disabled={loading || approving}
+            onChange={(event) => handleSubCategoryChange(event.target.value)}
+          >
+            <option value="">All sub categories</option>
+            {availableSubCategories.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {hasActiveFilters && (
+          <span className="previewCount">
+            {filteredMatchCount.toLocaleString()} {filteredMatchCount === 1 ? "match" : "matches"}
+          </span>
+        )}
+      </div>
 
       {error && (
         <div className="inlineAlert" role="alert">
@@ -155,11 +251,13 @@ export default function JobEditPage() {
           <PencilLine size={18} />
           <div>
             <h2>Needs your check</h2>
-            <p>AI flagged these bookings. Review them carefully — both sections are editable.</p>
+            <p>AI flagged these bookings. Review them carefully — all sections are editable.</p>
           </div>
         </header>
         {needsCheckCases.length === 0 ? (
-          <div className="emptyState">No bookings in this section.</div>
+          <div className="emptyState">
+            {hasActiveFilters ? "No bookings match your search or filter." : "No bookings in this section."}
+          </div>
         ) : (
           <div className="editCaseList">
             {needsCheckCases.map((item) => (
@@ -171,7 +269,7 @@ export default function JobEditPage() {
           label="Needs your check"
           page={needsCheckPage}
           totalPages={needsCheckTotalPages}
-          itemCount={needsCheckCount}
+          itemCount={needsCheckFilteredCount}
           pageSize={PAGE_SIZE_HINT}
           noun="bookings"
           disabled={loading}
@@ -181,31 +279,80 @@ export default function JobEditPage() {
 
       <section className="editBucketSection">
         <header className="editBucketHeader">
-          <CheckCircle2 size={18} />
+          <Sparkles size={18} />
           <div>
-            <h2>AI auto-approved</h2>
-            <p>These look ready to AI. You can still change any field or outcome.</p>
+            <h2>New / unique categories</h2>
+            <p>
+              Sub categories not in the allowed complaint list. Decide Include / Needs ops / Exclude before
+              approval — they still appear in category previews and the package when included.
+            </p>
           </div>
         </header>
-        {autoCases.length === 0 ? (
-          <div className="emptyState">No bookings in this section.</div>
+        {unhandledCases.length === 0 ? (
+          <div className="emptyState">
+            {hasActiveFilters ? "No bookings match your search or filter." : "No unique-category bookings."}
+          </div>
         ) : (
           <div className="editCaseList">
-            {autoCases.map((item) => (
+            {unhandledCases.map((item) => (
               <EditCaseCard key={item.booking_id} caseItem={item} disabled={!canEdit} onSave={handleSave} />
             ))}
           </div>
         )}
         <PaginationControls
-          label="AI auto-approved"
-          page={autoPage}
-          totalPages={autoTotalPages}
-          itemCount={autoCount}
+          label="New / unique categories"
+          page={unhandledPage}
+          totalPages={unhandledTotalPages}
+          itemCount={unhandledFilteredCount}
           pageSize={PAGE_SIZE_HINT}
           noun="bookings"
           disabled={loading}
-          onPageChange={setAutoPage}
+          onPageChange={setUnhandledPage}
         />
+      </section>
+
+      <section className="editBucketSection" data-collapsed={!autoExpanded || undefined}>
+        <button
+          type="button"
+          className="editBucketHeader editBucketToggle"
+          aria-expanded={autoExpanded}
+          onClick={() => setAutoExpanded((open) => !open)}
+        >
+          <CheckCircle2 size={18} />
+          <div>
+            <h2>AI auto-approved</h2>
+            <p>
+              {autoCount.toLocaleString()} booking{autoCount === 1 ? "" : "s"} look ready to AI. Click to{" "}
+              {autoExpanded ? "collapse" : "expand"}.
+            </p>
+          </div>
+          <ChevronDown size={18} className="editBucketChevron" data-open={autoExpanded || undefined} />
+        </button>
+        {autoExpanded && (
+          <>
+            {autoCases.length === 0 ? (
+              <div className="emptyState">
+                {hasActiveFilters ? "No bookings match your search or filter." : "No bookings in this section."}
+              </div>
+            ) : (
+              <div className="editCaseList">
+                {autoCases.map((item) => (
+                  <EditCaseCard key={item.booking_id} caseItem={item} disabled={!canEdit} onSave={handleSave} />
+                ))}
+              </div>
+            )}
+            <PaginationControls
+              label="AI auto-approved"
+              page={autoPage}
+              totalPages={autoTotalPages}
+              itemCount={autoFilteredCount}
+              pageSize={PAGE_SIZE_HINT}
+              noun="bookings"
+              disabled={loading}
+              onPageChange={setAutoPage}
+            />
+          </>
+        )}
       </section>
 
       {canEdit && (

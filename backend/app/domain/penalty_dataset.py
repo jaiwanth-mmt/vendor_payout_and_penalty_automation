@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
 from backend.app.core.paths import DEMO_WORKBOOK_PATH, RUNTIME_ROOT
+from backend.app.domain.complaint_message import normalize_category_key
 
 
 DEFAULT_INPUT_PATH = DEMO_WORKBOOK_PATH
@@ -36,6 +38,51 @@ def read_input_file(path: Path, sheet_name: str | int) -> pd.DataFrame:
     return df
 
 
+def parse_approval_datetimes(series: pd.Series) -> pd.Series:
+    """Parse Approval/Rejected DateTime cells into timestamps.
+
+    Handles Excel datetime cells and QlikSense text like ``20/07/2026  4:29:37 PM``
+    (day-first, collapsed whitespace). Time is kept on the timestamp; callers strip
+    to calendar day via ``.dt.normalize()`` when filtering.
+    """
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, errors="coerce")
+
+    text = (
+        series.astype("string")
+        .str.strip()
+        .str.replace(r"\s+", " ", regex=True)
+    )
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    # DD/MM/YYYY exports (with optional time) — day-first to avoid US month/day swap.
+    day_first_mask = text.str.match(r"^\d{1,2}/\d{1,2}/\d{4}", na=False)
+    if day_first_mask.any():
+        day_first_text = text.loc[day_first_mask]
+        day_first_parsed = pd.Series(pd.NaT, index=day_first_text.index, dtype="datetime64[ns]")
+        for fmt in ("%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+            still_missing = day_first_parsed.isna()
+            if not still_missing.any():
+                break
+            day_first_parsed.loc[still_missing] = pd.to_datetime(
+                day_first_text.loc[still_missing],
+                format=fmt,
+                errors="coerce",
+            )
+        still_missing = day_first_parsed.isna() & day_first_text.notna()
+        if still_missing.any():
+            day_first_parsed.loc[still_missing] = pd.to_datetime(
+                day_first_text.loc[still_missing],
+                errors="coerce",
+                dayfirst=True,
+            )
+        parsed.loc[day_first_mask] = day_first_parsed
+    # ISO / Excel-style and other remaining values.
+    remaining = ~day_first_mask & text.notna()
+    if remaining.any():
+        parsed.loc[remaining] = pd.to_datetime(text.loc[remaining], errors="coerce")
+    return parsed
+
+
 def filter_by_input_date(df: pd.DataFrame, date_column: str, input_date: str) -> pd.DataFrame:
     """Filter rows to a single calendar day. Prefer filter_by_input_date_range for jobs."""
     return filter_by_input_date_range(df, date_column, input_date, input_date)
@@ -56,8 +103,8 @@ def filter_by_input_date_range(
         raise ValueError(f"start_date {start_date!r} must be on or before end_date {end_date!r}.")
 
     output = df.copy()
-    output[date_column] = pd.to_datetime(output[date_column], errors="coerce")
-    day = output[date_column].dt.normalize()
+    parsed = parse_approval_datetimes(output[date_column])
+    day = parsed.dt.normalize()
     output = output.loc[day.ge(start) & day.le(end)].copy()
     return output
 
@@ -84,6 +131,33 @@ def remove_zero_recoverable_rows(df: pd.DataFrame, recoverable_column: str = "Re
 
     recoverable = pd.to_numeric(df[recoverable_column], errors="coerce").fillna(0)
     return df.loc[recoverable != 0].copy()
+
+
+def _subcategory_exclusion_key(value: object) -> str:
+    """Normalize Sub Category for exclusion matching (strip CARBD/CAR- prefix first)."""
+    text = "" if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
+    cleaned = re.sub(SUB_CATEGORY_PREFIX_PATTERN, "", text).strip()
+    return normalize_category_key(cleaned)
+
+
+def is_excluded_subcategory(value: object) -> bool:
+    """True for User cancellation or any Customer Delight variant (case-insensitive)."""
+    key = _subcategory_exclusion_key(value)
+    if not key:
+        return False
+    return key == "user cancellation" or "customer delight" in key
+
+
+def drop_excluded_subcategories(
+    df: pd.DataFrame,
+    sub_category_column: str = "Sub Category",
+) -> pd.DataFrame:
+    """Drop Sub Categories that never receive vendor penalty (User cancellation / Customer Delight)."""
+    if sub_category_column not in df.columns:
+        raise KeyError(f"Column {sub_category_column!r} not found in input file.")
+
+    keep_mask = ~df[sub_category_column].map(is_excluded_subcategory)
+    return df.loc[keep_mask].copy()
 
 
 def get_duplicate_entries(df: pd.DataFrame) -> pd.DataFrame:

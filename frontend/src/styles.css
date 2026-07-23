@@ -755,6 +755,60 @@ h2 {
   background: var(--color-surface);
 }
 
+.fieldRowDisabled {
+  opacity: 0.45;
+}
+
+.fieldRowDisabled input {
+  cursor: not-allowed;
+  background: #f2f4f8;
+}
+
+.optionRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 18px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid #cfd7e6;
+  border-radius: var(--radius);
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.optionRow input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--color-ink);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.optionRowCopy {
+  display: grid;
+  gap: 2px;
+}
+
+.optionRowCopy strong {
+  color: var(--color-ink);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.optionRowCopy small {
+  color: #667085;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.fieldHint {
+  margin: 0 0 14px;
+  color: #667085;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .primaryButton,
 .ghostButton {
   justify-content: center;
@@ -1147,24 +1201,6 @@ h2 {
 .categoryProgressItem[data-status="failed"] .categoryStatusBlock em {
   background: #ffe1e4;
   color: #c7162b;
-}
-
-.cabDelayCounters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.cabDelayCounters span {
-  width: fit-content;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 3px 6px;
-  background: var(--color-surface);
-  color: #344054;
-  font-size: 0.72rem;
-  font-weight: 850;
 }
 
 .categoryTabs {
@@ -2913,6 +2949,48 @@ h2 {
   white-space: nowrap;
 }
 
+.editToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.editSubcategoryFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.editSubcategoryFilter label {
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.editSubcategoryFilter select {
+  min-width: 180px;
+  min-height: 34px;
+  border: 1px solid #cfd7e6;
+  border-radius: var(--radius);
+  padding: 0 28px 0 10px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.editSubcategoryFilter select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .editBucketSection {
   display: flex;
   flex-direction: column;
@@ -2927,6 +3005,34 @@ h2 {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+}
+
+button.editBucketToggle {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+button.editBucketToggle:focus-visible {
+  outline: 2px solid var(--color-accent, #2563eb);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.editBucketChevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.editBucketChevron[data-open] {
+  transform: rotate(180deg);
 }
 
 .editBucketHeader h2 {
@@ -3158,9 +3264,19 @@ h2 {
 
 @media (max-width: 840px) {
   .editPageHeader,
-  .editApproveBar {
+  .editApproveBar,
+  .editToolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .editSubcategoryFilter {
+    width: 100%;
+  }
+
+  .editSubcategoryFilter select {
+    flex: 1;
+    min-width: 0;
   }
 
   .editApproveBar .primaryButton {

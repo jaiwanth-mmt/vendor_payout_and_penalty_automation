@@ -15,10 +15,9 @@ from backend.app.domain.cab_delay_enrichment import (
     COMMENTS_COLUMN,
     DRIVER_ARRIVED_COLUMN,
     DRIVER_STARTED_COLUMN,
-    INCABS_COMMENT_SUMMARY_COLUMN,
-    INCABS_INSIGHT_COLUMN,
     PREFERRED_START_TIME_IST_COLUMN,
 )
+from backend.app.domain.category_processors import CAB_DELAY_OUTPUT_COLUMNS
 from backend.app.domain.complaint_message import MESSAGE_COLUMN
 from backend.app.domain.tracking_common import (
     COMPLAINT_AGAINST_VALUE,
@@ -26,7 +25,7 @@ from backend.app.domain.tracking_common import (
     VENDOR_NAME_COLUMN,
 )
 from backend.app.services import pipeline
-from backend.app.services.pipeline import CAB_DELAY_OUTPUT_COLUMNS, apply_edits_and_package, process_uploaded_workbook
+from backend.app.services.pipeline import apply_edits_and_package, process_uploaded_workbook
 from backend.tests.factories import (
     assert_complaint_metadata,
     mock_llm,
@@ -84,10 +83,9 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     output_df = pd.read_excel(cab_delay_output, keep_default_na=False)
     assert result.metrics["raw_rows"] == 5
     assert result.metrics["date_filtered_rows"] == 4
+    assert result.metrics["process_all"] == 0
     assert result.metrics["prepared_rows"] == 1
     assert result.metrics["category_count"] == 1
-    assert result.metrics["generated_insight_rows"] == 1
-    assert result.metrics["generated_comment_summary_rows"] == 1
     assert packaged["package_path"] == package_path
     assert package_path.exists()
     assert packaged["case_counts"]["total_cases"] == 1
@@ -147,11 +145,9 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert output_df.loc[0, DRIVER_STARTED_COLUMN] == "19 Mar 2026 10:20 AM"
     assert output_df.loc[0, DRIVER_ARRIVED_COLUMN] == "19 Mar 2026 10:40 AM"
     assert output_df.loc[0, BOARDED_COLUMN] == "19 Mar 2026 10:45 AM"
-    assert output_df.loc[0, INCABS_INSIGHT_COLUMN] == "Mock Incabs insight."
     assert output_df.loc[0, COMMENTS_COLUMN] == (
         "Customer reported that the cab had not arrived and the driver said they needed 20 minutes."
     )
-    assert output_df.loc[0, INCABS_COMMENT_SUMMARY_COLUMN] == "Mock combined summary."
     assert output_df.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 15 Minutes"
     assert result.category_outputs[0]["name"] == "Cab Delay"
     assert result.category_outputs[0]["row_count"] == 1
@@ -170,6 +166,34 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
             "category_files/prepared/cab-delay.xlsx",
             "category_files/processed/cab-delay.xlsx",
         }
+
+
+def test_process_uploaded_workbook_process_all_skips_date_filter(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "qliksense.xlsx"
+    tracking_path = tmp_path / "tracking.json"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
+    write_sample_workbook(workbook_path)
+    write_tracking_json(tracking_path)
+
+    result = process_uploaded_workbook(
+        input_path=workbook_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
+        output_package_path=package_path,
+        start_date="",
+        end_date="",
+        process_all=True,
+        on_step_start=lambda _step_id, _message: None,
+        on_step_complete=lambda _step_id, _message: None,
+        on_warning=lambda _warning: None,
+        reason_generator=mock_llm,
+        job_id="pipeline-process-all-job",
+    )
+
+    assert result.metrics["raw_rows"] == 5
+    assert result.metrics["date_filtered_rows"] == 5
+    assert result.metrics["process_all"] == 1
+    assert result.metrics["prepared_rows"] == 2
+    assert result.awaiting_edit is True
 
 
 def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> None:
@@ -204,7 +228,7 @@ def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> 
     assert [category["slug"] for category in initialized_categories[0]] == ["cab-delay", "extra-money-taken"]
     assert step_updates[-1] == ("categories_processed", 2, 2, "2 of 2 categories processed")
     assert ("cab-delay", {"status": "completed", "message": "Processed 1 rows"}) in category_updates
-    assert any(slug == "cab-delay" and "cab_delay" in update for slug, update in category_updates)
+    assert ("extra-money-taken", {"status": "completed", "message": "Processed 1 rows"}) in category_updates
 
 
 def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: Path, monkeypatch) -> None:
@@ -308,50 +332,6 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
         assert "final_output.xlsx" in names
         assert sum(name.startswith("category_files/prepared/") for name in names) == 9
         assert sum(name.startswith("category_files/processed/") for name in names) == 9
-
-
-def test_process_uploaded_workbook_keeps_package_when_comment_summary_fails(tmp_path: Path) -> None:
-    workbook_path = tmp_path / "qliksense.xlsx"
-    tracking_path = tmp_path / "tracking.json"
-    package_path = tmp_path / "agentic_loss_recovery_package.zip"
-    write_sample_workbook(workbook_path)
-    write_tracking_json(tracking_path)
-
-    warnings: list[dict[str, object]] = []
-
-    def failing_summary_llm(prompt: str, _tokens: int, _effort: str) -> str:
-        if "Customer call comment:" in prompt:
-            raise RuntimeError("summary failed")
-        return "Mock Incabs insight."
-
-    result = process_uploaded_workbook(
-        input_path=workbook_path,
-        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
-        output_package_path=package_path,
-        start_date="2026-03-19",
-        end_date="2026-03-19",
-        on_step_start=lambda _step_id, _message: None,
-        on_step_complete=lambda _step_id, _message: None,
-        on_warning=warnings.append,
-        reason_generator=failing_summary_llm,
-        job_id="summary-fail-job",
-    )
-
-    _approve_default_edits(result, tmp_path=tmp_path, package_path=package_path, job_id="summary-fail-job")
-
-    output_df = pd.read_excel(tmp_path / "category_files" / "processed" / "cab-delay.xlsx", keep_default_na=False)
-    assert package_path.exists()
-    assert result.metrics["generated_insight_rows"] == 1
-    assert result.metrics["failed_comment_summary_rows"] == 1
-    assert output_df.loc[0, INCABS_INSIGHT_COLUMN] == "Mock Incabs insight."
-    assert output_df.loc[0, INCABS_COMMENT_SUMMARY_COLUMN] == ""
-    assert warnings == [
-        {
-            "code": "azure_comment_summary_failed",
-            "message": "1 Incabs/comment summaries could not be generated. Processed category files were still produced.",
-            "booking_ids": ["B1"],
-        }
-    ]
 
 
 def test_process_uploaded_workbook_reports_missing_columns(tmp_path: Path) -> None:

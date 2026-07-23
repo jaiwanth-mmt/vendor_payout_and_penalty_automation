@@ -117,6 +117,7 @@ def test_build_manifest_omits_preview_rows() -> None:
 
     assert manifest["start_date"] == "2026-03-19"
     assert manifest["end_date"] == "2026-03-19"
+    assert manifest["process_all"] is False
     assert manifest["raw_rows"] == 5
     assert manifest["prepared_rows"] == 1
     assert manifest["final_output"] == final_output

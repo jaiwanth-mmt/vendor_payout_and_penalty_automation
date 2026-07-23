@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from backend.app.domain.cab_delay_enrichment import INCABS_INSIGHT_COLUMN
+from backend.app.domain.cab_delay_enrichment import COMMENTS_COLUMN
 from backend.app.domain.penalty_dataset import FINAL_OUTPUT_COLUMNS
 from backend.app.domain.subcategories import build_unique_slug_map, normalize_subcategory_name, slugify
 from backend.app.services.pipeline import shape_prepared_output, split_by_subcategory
@@ -60,7 +60,7 @@ def test_shape_prepared_output_does_not_add_cab_delay_columns() -> None:
                 "Loss Amount": 100,
                 "Recoverable": 100,
                 "Remarks": "Cab Delay - Auto Claim Raised",
-                INCABS_INSIGHT_COLUMN: "Existing insight",
+                COMMENTS_COLUMN: "Existing comment",
             }
         ]
     )
@@ -70,4 +70,4 @@ def test_shape_prepared_output_does_not_add_cab_delay_columns() -> None:
     assert shaped.columns.tolist() == FINAL_OUTPUT_COLUMNS
     assert shaped.loc[0, "Sub Category"] == "Cab Delay"
     assert shaped.loc[0, "Remarks"] == "Cab Delay"
-    assert INCABS_INSIGHT_COLUMN not in shaped.columns
+    assert COMMENTS_COLUMN not in shaped.columns

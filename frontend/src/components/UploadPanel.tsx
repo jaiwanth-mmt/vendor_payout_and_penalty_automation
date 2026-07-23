@@ -5,11 +5,13 @@ type UploadPanelProps = {
   selectedFile: File | null;
   startDate: string;
   endDate: string;
+  processAll: boolean;
   isProcessing: boolean;
   error: string | null;
   onFileSelect: (file: File | null) => void;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
+  onProcessAllChange: (value: boolean) => void;
   onSubmit: () => void;
 };
 
@@ -17,11 +19,13 @@ function UploadPanel({
   selectedFile,
   startDate,
   endDate,
+  processAll,
   isProcessing,
   error,
   onFileSelect,
   onStartDateChange,
   onEndDateChange,
+  onProcessAllChange,
   onSubmit
 }: UploadPanelProps) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -62,7 +66,20 @@ function UploadPanel({
         <strong>{selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : ".xlsx or .xls"}</strong>
       </label>
 
-      <div className="fieldRow">
+      <label className="optionRow" htmlFor="processAll">
+        <input
+          id="processAll"
+          type="checkbox"
+          checked={processAll}
+          onChange={(event) => onProcessAllChange(event.target.checked)}
+        />
+        <span className="optionRowCopy">
+          <strong>Process entire workbook</strong>
+          <small>Skip Approval/Rejected DateTime filter and keep all rows</small>
+        </span>
+      </label>
+
+      <div className={`fieldRow${processAll ? " fieldRowDisabled" : ""}`}>
         <label htmlFor="startDate">
           <CalendarDays size={18} />
           <span>Approval start</span>
@@ -71,11 +88,12 @@ function UploadPanel({
           id="startDate"
           type="date"
           value={startDate}
+          disabled={processAll}
           onChange={(event) => onStartDateChange(event.target.value)}
         />
       </div>
 
-      <div className="fieldRow">
+      <div className={`fieldRow${processAll ? " fieldRowDisabled" : ""}`}>
         <label htmlFor="endDate">
           <CalendarDays size={18} />
           <span>Approval end</span>
@@ -84,9 +102,16 @@ function UploadPanel({
           id="endDate"
           type="date"
           value={endDate}
+          disabled={processAll}
           onChange={(event) => onEndDateChange(event.target.value)}
         />
       </div>
+
+      <p className="fieldHint">
+        {processAll
+          ? "Date range is ignored. CARBD and recoverable filters still apply."
+          : "Filters on Approval/Rejected DateTime (calendar day, inclusive)."}
+      </p>
 
       <button className="primaryButton" type="submit" disabled={isProcessing || !selectedFile}>
         {isProcessing ? <LoaderCircle className="spin" size={18} /> : <Play size={18} />}

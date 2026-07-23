@@ -8,19 +8,10 @@ from typing import Any
 import pandas as pd
 
 from backend.app.agents import AGENT_OUTPUT_COLUMNS, investigate_category_frame_async
-from backend.app.core.tracking_utils import first_tracking_row
 from backend.app.domain.cab_delay_enrichment import (
     CAB_DELAY_ENRICHMENT_COLUMNS,
     COMMENTS_COLUMN,
-    INCABS_COMMENT_SUMMARY_COLUMN,
-    INCABS_INSIGHT_COLUMN,
-    PREFERRED_START_TIME_IST_COLUMN,
-    build_comment_summary_prompt,
-    build_incabs_insight_prompt,
-    build_timing_context,
-    build_tracking_enrichment,
-    ensure_enrichment_columns,
-    find_target_rows,
+    enrich_cab_delay_rows,
 )
 from backend.app.integrations.llm_client import call_llm_sync, maybe_call_llm
 from backend.app.domain.complaint_message import (
@@ -115,30 +106,15 @@ CATEGORY_PROCESSORS: dict[str, CategoryProcessorSpec] = {
 
 
 @dataclass
-class InsightSummary:
-    target_insight_rows: int = 0
-    existing_insight_rows: int = 0
-    generated_insight_rows: int = 0
-    failed_insight_rows: int = 0
-    unmatched_insight_rows: int = 0
-    target_comment_summary_rows: int = 0
-    existing_comment_summary_rows: int = 0
-    generated_comment_summary_rows: int = 0
-    failed_comment_summary_rows: int = 0
-    warnings: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass
 class CategoryProcessingOutcome:
     df: pd.DataFrame
-    insight_summary: InsightSummary | None = None
     failed: bool = False
     error: str | None = None
     warnings: list[dict[str, Any]] = field(default_factory=list)
     agent_cases: list[dict[str, Any]] = field(default_factory=list)
 
 
-CategoryEnrichmentResult = tuple[pd.DataFrame, InsightSummary | None, list[dict[str, Any]]]
+CategoryEnrichmentResult = tuple[pd.DataFrame, list[dict[str, Any]]]
 CategoryAsyncEnricher = Callable[..., Awaitable[CategoryEnrichmentResult]]
 
 
@@ -152,16 +128,14 @@ async def _enrich_cab_delay_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
 ) -> CategoryEnrichmentResult:
-    enriched_df, insight_summary = await enrich_cab_delay_insights_async(
+    del llm_generator, llm_concurrency
+    enriched_df = await asyncio.to_thread(
+        enrich_cab_delay_rows,
         df,
         tracking_bookings=tracking_bookings,
-        llm_generator=llm_generator,
-        llm_concurrency=llm_concurrency,
-        on_progress=on_cab_delay_progress,
     )
-    return enriched_df, insight_summary, []
+    return enriched_df, []
 
 
 async def _enrich_extra_money_taken_async(
@@ -170,15 +144,14 @@ async def _enrich_extra_money_taken_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
 ) -> CategoryEnrichmentResult:
-    del llm_generator, llm_concurrency, on_cab_delay_progress
+    del llm_generator, llm_concurrency
     enriched_df = await asyncio.to_thread(
         enrich_extra_money_taken_rows,
         df,
         tracking_bookings=tracking_bookings,
     )
-    return enriched_df, None, []
+    return enriched_df, []
 
 
 async def _enrich_fulfillment_not_done_async(
@@ -187,15 +160,14 @@ async def _enrich_fulfillment_not_done_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
 ) -> CategoryEnrichmentResult:
-    del llm_generator, llm_concurrency, on_cab_delay_progress
+    del llm_generator, llm_concurrency
     enriched_df = await asyncio.to_thread(
         enrich_fulfillment_not_done_rows,
         df,
         tracking_bookings=tracking_bookings,
     )
-    return enriched_df, None, []
+    return enriched_df, []
 
 
 async def _enrich_lower_category_vehicle_async(
@@ -204,16 +176,14 @@ async def _enrich_lower_category_vehicle_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
 ) -> CategoryEnrichmentResult:
-    del on_cab_delay_progress
     enriched_df, warnings = await enrich_lower_category_vehicle_async(
         df,
         tracking_bookings=tracking_bookings,
         llm_generator=llm_generator,
         llm_concurrency=llm_concurrency,
     )
-    return enriched_df, None, warnings
+    return enriched_df, warnings
 
 
 async def _enrich_default_async(
@@ -222,10 +192,9 @@ async def _enrich_default_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
 ) -> CategoryEnrichmentResult:
-    del tracking_bookings, llm_generator, llm_concurrency, on_cab_delay_progress
-    return df, None, []
+    del tracking_bookings, llm_generator, llm_concurrency
+    return df, []
 
 
 CATEGORY_ASYNC_ENRICHERS: dict[str, CategoryAsyncEnricher] = {
@@ -248,7 +217,6 @@ def process_category_batch(
             tracking_bookings=tracking_bookings,
             llm_generator=llm_generator,
             llm_concurrency=1,
-            on_cab_delay_progress=lambda _counters, _message: None,
         )
     )
 
@@ -259,19 +227,17 @@ async def process_category_batch_async(
     tracking_bookings: dict[str, Any],
     llm_generator: LlmGenerator,
     llm_concurrency: int,
-    on_cab_delay_progress: Callable[[dict[str, int], str], None],
     job_id: str | None = None,
     enable_hitl: bool = False,
     on_agent_event=None,
 ) -> CategoryProcessingOutcome:
     base_df = enrich_common_tracking_fields(batch.df, tracking_bookings=tracking_bookings)
     enricher = CATEGORY_ASYNC_ENRICHERS.get(batch.name, _enrich_default_async)
-    enriched_df, insight_summary, warnings = await enricher(
+    enriched_df, warnings = await enricher(
         base_df,
         tracking_bookings=tracking_bookings,
         llm_generator=llm_generator,
         llm_concurrency=llm_concurrency,
-        on_cab_delay_progress=on_cab_delay_progress,
     )
     enriched_df = await enrich_message_column_async(
         enriched_df,
@@ -289,7 +255,6 @@ async def process_category_batch_async(
     )
     return CategoryProcessingOutcome(
         enriched_df.loc[:, output_columns_for_category(batch.name)].copy(),
-        insight_summary,
         warnings=warnings,
         agent_cases=agent_cases,
     )
@@ -615,87 +580,6 @@ def build_lower_category_vehicle_warnings(failed_booking_ids: list[str]) -> list
     ]
 
 
-def enrich_cab_delay_insights(
-    df: pd.DataFrame,
-    *,
-    tracking_bookings: dict[str, Any],
-    llm_generator: LlmGenerator,
-    max_completion_tokens: int = 2048,
-    reasoning_effort: str = "minimal",
-) -> tuple[pd.DataFrame, InsightSummary]:
-    output = ensure_enrichment_columns(df)
-
-    for index in output.index.tolist():
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        if not booking_id:
-            continue
-        enrichment = build_tracking_enrichment(tracking_bookings, booking_id)
-        for column, value in enrichment.to_columns().items():
-            output.at[index, column] = value
-
-    target_mask = find_target_rows(output)
-    existing_insight_mask = output[INCABS_INSIGHT_COLUMN].fillna("").astype(str).str.strip().ne("")
-    pending_insight_mask = target_mask & ~existing_insight_mask
-    summary = InsightSummary(
-        target_insight_rows=int(target_mask.sum()),
-        existing_insight_rows=int((target_mask & existing_insight_mask).sum()),
-    )
-
-    failed_insight_booking_ids: list[str] = []
-    failed_summary_booking_ids: list[str] = []
-    unmatched_booking_ids: list[str] = []
-
-    for index in output.index[pending_insight_mask].tolist():
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        tracking_row = first_tracking_row(tracking_bookings, booking_id)
-        if not tracking_row:
-            unmatched_booking_ids.append(booking_id)
-            continue
-
-        prompt = build_incabs_insight_prompt(booking_id, build_timing_context(tracking_row))
-        try:
-            output.at[index, INCABS_INSIGHT_COLUMN] = call_azure_or_custom_sync(
-                llm_generator,
-                prompt,
-                max_completion_tokens,
-                reasoning_effort,
-            )
-            summary.generated_insight_rows += 1
-        except Exception:
-            failed_insight_booking_ids.append(booking_id)
-
-    summary_mask = (
-        target_mask
-        & output[INCABS_INSIGHT_COLUMN].fillna("").astype(str).str.strip().ne("")
-        & output[COMMENTS_COLUMN].fillna("").astype(str).str.strip().ne("")
-    )
-    existing_summary_mask = output[INCABS_COMMENT_SUMMARY_COLUMN].fillna("").astype(str).str.strip().ne("")
-    pending_summary_mask = summary_mask & ~existing_summary_mask
-    summary.target_comment_summary_rows = int(summary_mask.sum())
-    summary.existing_comment_summary_rows = int((summary_mask & existing_summary_mask).sum())
-
-    for index in output.index[pending_summary_mask].tolist():
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        prompt = build_comment_summary_prompt(
-            booking_id=booking_id,
-            incabs_insight=str(output.at[index, INCABS_INSIGHT_COLUMN]).strip(),
-            comments=str(output.at[index, COMMENTS_COLUMN]).strip(),
-            preferred_start_time_ist=str(output.at[index, PREFERRED_START_TIME_IST_COLUMN]).strip(),
-        )
-        try:
-            output.at[index, INCABS_COMMENT_SUMMARY_COLUMN] = call_azure_or_custom_sync(
-                llm_generator,
-                prompt,
-                max_completion_tokens,
-                reasoning_effort,
-            )
-            summary.generated_comment_summary_rows += 1
-        except Exception:
-            failed_summary_booking_ids.append(booking_id)
-
-    add_cab_delay_warnings(summary, unmatched_booking_ids, failed_insight_booking_ids, failed_summary_booking_ids)
-    return output, summary
-
 
 def call_azure_or_custom_sync(
     llm_generator: LlmGenerator,
@@ -704,196 +588,3 @@ def call_azure_or_custom_sync(
     reasoning_effort: str,
 ) -> str:
     return call_llm_sync(llm_generator, prompt, max_completion_tokens, reasoning_effort)
-
-
-async def enrich_cab_delay_insights_async(
-    df: pd.DataFrame,
-    *,
-    tracking_bookings: dict[str, Any],
-    llm_generator: LlmGenerator,
-    llm_concurrency: int,
-    on_progress: Callable[[dict[str, int], str], None],
-    max_completion_tokens: int = 2048,
-    reasoning_effort: str = "minimal",
-) -> tuple[pd.DataFrame, InsightSummary]:
-    output = ensure_enrichment_columns(df)
-
-    for index in output.index.tolist():
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        if not booking_id:
-            continue
-        enrichment = build_tracking_enrichment(tracking_bookings, booking_id)
-        for column, value in enrichment.to_columns().items():
-            output.at[index, column] = value
-
-    target_mask = find_target_rows(output)
-    existing_insight_mask = output[INCABS_INSIGHT_COLUMN].fillna("").astype(str).str.strip().ne("")
-    pending_insight_mask = target_mask & ~existing_insight_mask
-    summary = InsightSummary(
-        target_insight_rows=int(target_mask.sum()),
-        existing_insight_rows=int((target_mask & existing_insight_mask).sum()),
-    )
-    counters = cab_delay_progress_payload(summary)
-    on_progress(counters, format_cab_delay_progress(counters))
-
-    failed_insight_booking_ids: list[str] = []
-    failed_summary_booking_ids: list[str] = []
-    unmatched_booking_ids: list[str] = []
-    insight_updates: list[tuple[int, str]] = []
-    semaphore = asyncio.Semaphore(llm_concurrency)
-
-    async def generate_insight(index: int) -> tuple[str, int, str, str | None]:
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        tracking_row = first_tracking_row(tracking_bookings, booking_id)
-        if not tracking_row:
-            return "unmatched", index, booking_id, None
-
-        prompt = build_incabs_insight_prompt(booking_id, build_timing_context(tracking_row))
-        try:
-            async with semaphore:
-                value = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
-            return "generated", index, booking_id, value
-        except Exception:
-            return "failed", index, booking_id, None
-
-    insight_tasks = [
-        asyncio.create_task(generate_insight(index))
-        for index in output.index[pending_insight_mask].tolist()
-    ]
-    for task in asyncio.as_completed(insight_tasks):
-        status, index, booking_id, value = await task
-        if status == "generated" and value is not None:
-            insight_updates.append((index, value))
-            summary.generated_insight_rows += 1
-        elif status == "unmatched":
-            unmatched_booking_ids.append(booking_id)
-        else:
-            failed_insight_booking_ids.append(booking_id)
-            summary.failed_insight_rows = len(failed_insight_booking_ids)
-
-        counters = cab_delay_progress_payload(summary)
-        on_progress(counters, format_cab_delay_progress(counters))
-
-    for index, value in insight_updates:
-        output.at[index, INCABS_INSIGHT_COLUMN] = value
-
-    summary_mask = (
-        target_mask
-        & output[INCABS_INSIGHT_COLUMN].fillna("").astype(str).str.strip().ne("")
-        & output[COMMENTS_COLUMN].fillna("").astype(str).str.strip().ne("")
-    )
-    existing_summary_mask = output[INCABS_COMMENT_SUMMARY_COLUMN].fillna("").astype(str).str.strip().ne("")
-    pending_summary_mask = summary_mask & ~existing_summary_mask
-    summary.target_comment_summary_rows = int(summary_mask.sum())
-    summary.existing_comment_summary_rows = int((summary_mask & existing_summary_mask).sum())
-    counters = cab_delay_progress_payload(summary)
-    on_progress(counters, format_cab_delay_progress(counters))
-
-    async def generate_summary(index: int) -> tuple[str, int, str, str | None]:
-        booking_id = str(output.at[index, "Booking ID"]).strip()
-        prompt = build_comment_summary_prompt(
-            booking_id=booking_id,
-            incabs_insight=str(output.at[index, INCABS_INSIGHT_COLUMN]).strip(),
-            comments=str(output.at[index, COMMENTS_COLUMN]).strip(),
-            preferred_start_time_ist=str(output.at[index, PREFERRED_START_TIME_IST_COLUMN]).strip(),
-        )
-        try:
-            async with semaphore:
-                value = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
-            return "generated", index, booking_id, value
-        except Exception:
-            return "failed", index, booking_id, None
-
-    summary_updates: list[tuple[int, str]] = []
-    summary_tasks = [
-        asyncio.create_task(generate_summary(index))
-        for index in output.index[pending_summary_mask].tolist()
-    ]
-    for task in asyncio.as_completed(summary_tasks):
-        status, index, booking_id, value = await task
-        if status == "generated" and value is not None:
-            summary_updates.append((index, value))
-            summary.generated_comment_summary_rows += 1
-        else:
-            failed_summary_booking_ids.append(booking_id)
-            summary.failed_comment_summary_rows = len(failed_summary_booking_ids)
-
-        counters = cab_delay_progress_payload(summary)
-        on_progress(counters, format_cab_delay_progress(counters))
-
-    for index, value in summary_updates:
-        output.at[index, INCABS_COMMENT_SUMMARY_COLUMN] = value
-
-    summary.failed_insight_rows = len(failed_insight_booking_ids)
-    summary.failed_comment_summary_rows = len(failed_summary_booking_ids)
-    add_cab_delay_warnings(summary, unmatched_booking_ids, failed_insight_booking_ids, failed_summary_booking_ids)
-    counters = cab_delay_progress_payload(summary)
-    on_progress(counters, format_cab_delay_progress(counters))
-    return output, summary
-
-
-def cab_delay_progress_payload(summary: InsightSummary | None = None) -> dict[str, int]:
-    summary = summary or InsightSummary()
-    return {
-        "target_insight_rows": summary.target_insight_rows,
-        "generated_insight_rows": summary.generated_insight_rows,
-        "failed_insight_rows": summary.failed_insight_rows,
-        "target_comment_summary_rows": summary.target_comment_summary_rows,
-        "generated_comment_summary_rows": summary.generated_comment_summary_rows,
-        "failed_comment_summary_rows": summary.failed_comment_summary_rows,
-    }
-
-
-def format_cab_delay_progress(counters: dict[str, int]) -> str:
-    insight_done = counters["generated_insight_rows"] + counters["failed_insight_rows"]
-    summary_done = counters["generated_comment_summary_rows"] + counters["failed_comment_summary_rows"]
-    return (
-        f"Insights {insight_done}/{counters['target_insight_rows']} | "
-        f"Summaries {summary_done}/{counters['target_comment_summary_rows']}"
-    )
-
-
-def add_cab_delay_warnings(
-    summary: InsightSummary,
-    unmatched_booking_ids: list[str],
-    failed_insight_booking_ids: list[str],
-    failed_summary_booking_ids: list[str],
-) -> None:
-    if unmatched_booking_ids:
-        summary.unmatched_insight_rows = len(unmatched_booking_ids)
-        summary.warnings.append(
-            {
-                "code": "insight_tracking_missing",
-                "message": (
-                    f"{len(unmatched_booking_ids)} cab-delay rows could not be enriched "
-                    "because tracking evidence was unavailable."
-                ),
-                "booking_ids": unmatched_booking_ids,
-            }
-        )
-
-    if failed_insight_booking_ids:
-        summary.failed_insight_rows = len(failed_insight_booking_ids)
-        summary.warnings.append(
-            {
-                "code": "azure_insight_failed",
-                "message": (
-                    f"{len(failed_insight_booking_ids)} cab-delay insights could not be generated. "
-                    "Processed category files were still produced."
-                ),
-                "booking_ids": failed_insight_booking_ids,
-            }
-        )
-
-    if failed_summary_booking_ids:
-        summary.failed_comment_summary_rows = len(failed_summary_booking_ids)
-        summary.warnings.append(
-            {
-                "code": "azure_comment_summary_failed",
-                "message": (
-                    f"{len(failed_summary_booking_ids)} Incabs/comment summaries could not be generated. "
-                    "Processed category files were still produced."
-                ),
-                "booking_ids": failed_summary_booking_ids,
-            }
-        )

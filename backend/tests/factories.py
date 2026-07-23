@@ -361,9 +361,7 @@ def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
         return '{"categories": ["Cab Delay"]}'
     if "customer_booked_vehicle" in prompt:
         return '{"customer_booked_vehicle": "electric sedan", "customer_received_vehicle": "CNG hatchback"}'
-    if "Customer call comment:" in prompt:
-        return "Mock combined summary."
-    return "Mock Incabs insight."
+    return "Mock unused enrichment text."
 
 
 def build_agent_decision_response(prompt: str) -> str:
