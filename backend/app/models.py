@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 StepStatus = Literal["pending", "running", "completed", "warning", "failed"]
 JobStatus = Literal["queued", "running", "awaiting_edit", "awaiting_review", "succeeded", "failed"]
 EditOutcome = Literal["include", "needs_ops", "exclude"]
-AiBucket = Literal["needs_check", "auto_approved"]
+AiBucket = Literal["needs_check", "auto_approved", "unhandled"]
 
 
 class StepState(BaseModel):
@@ -181,8 +181,10 @@ class EditCasesPageResponse(BaseModel):
     total_pages: int
     needs_check_count: int = 0
     auto_approved_count: int = 0
+    unhandled_count: int = 0
     edited_case_count: int = 0
     excluded_case_count: int = 0
+    available_sub_categories: list[str] = Field(default_factory=list)
 
 
 class AgentSummary(BaseModel):
@@ -202,6 +204,7 @@ class AgentSummary(BaseModel):
     excluded_case_count: int = 0
     needs_check_count: int = 0
     auto_approved_count: int = 0
+    unhandled_count: int = 0
 
 
 class AgentCasesPageResponse(BaseModel):
@@ -212,15 +215,6 @@ class AgentCasesPageResponse(BaseModel):
     total_pages: int
 
 
-class CabDelayProgress(BaseModel):
-    target_insight_rows: int = 0
-    generated_insight_rows: int = 0
-    failed_insight_rows: int = 0
-    target_comment_summary_rows: int = 0
-    generated_comment_summary_rows: int = 0
-    failed_comment_summary_rows: int = 0
-
-
 class CategoryProgress(BaseModel):
     name: str
     slug: str
@@ -229,7 +223,6 @@ class CategoryProgress(BaseModel):
     message: str = "Pending"
     started_at: str | None = None
     completed_at: str | None = None
-    cab_delay: CabDelayProgress | None = None
 
 
 class JobResponse(BaseModel):
@@ -239,6 +232,7 @@ class JobResponse(BaseModel):
     original_filename: str
     start_date: str
     end_date: str
+    process_all: bool = False
     created_at: str
     updated_at: str
     steps: list[StepState]

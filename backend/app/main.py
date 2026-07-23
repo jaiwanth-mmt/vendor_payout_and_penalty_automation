@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import load_workbook
 
 from backend.app.core.env import load_env_file
-from backend.app.core.paths import DEFAULT_END_DATE, DEFAULT_START_DATE, JOB_RUNTIME_ROOT, REPO_ROOT
+from backend.app.core.paths import JOB_RUNTIME_ROOT, REPO_ROOT
 from backend.app.agents.orchestrator import review_queue_row
 from backend.app.agents.runner import (
     get_graph_topology,
@@ -38,8 +38,10 @@ from backend.app.models import (
     ReviewQueuePageResponse,
 )
 from backend.app.services.edit_cases import (
+    distinct_edit_sub_categories,
     edit_case_api_view,
     edit_metrics,
+    filter_edit_cases,
     patch_edit_case,
 )
 from backend.app.services.job_store import JobStore
@@ -90,10 +92,20 @@ def health() -> dict[str, str]:
 async def create_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    start_date: str = Form(DEFAULT_START_DATE),
-    end_date: str = Form(DEFAULT_END_DATE),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    process_all: bool = Form(False),
 ) -> CreateJobResponse:
-    validate_date_range(start_date, end_date)
+    if process_all:
+        start_date = ""
+        end_date = ""
+    else:
+        if not start_date or not end_date:
+            raise HTTPException(
+                status_code=422,
+                detail="start_date and end_date are required unless process_all is true",
+            )
+        validate_date_range(start_date, end_date)
     validate_upload(file)
 
     job_id = uuid4().hex
@@ -107,14 +119,29 @@ async def create_job(
         original_filename=file.filename or "uploaded-workbook.xlsx",
         start_date=start_date,
         end_date=end_date,
+        process_all=process_all,
         job_dir=job_dir,
         upload_path=upload_path,
     )
     job_store.mark_step_running(job_id, "upload_received", "Workbook uploaded")
     job_store.mark_step_completed(job_id, "upload_received", "Upload stored securely")
 
-    background_tasks.add_task(run_processing_job, job_id, upload_path, start_date, end_date, job_dir)
+    background_tasks.add_task(
+        run_processing_job,
+        job_id,
+        upload_path,
+        start_date,
+        end_date,
+        job_dir,
+        process_all,
+    )
     return CreateJobResponse(job_id=job_id, status="queued")
+
+
+def job_download_range_label(snapshot: JobResponse) -> str:
+    if snapshot.process_all:
+        return "full"
+    return f"{snapshot.start_date}_to_{snapshot.end_date}"
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
@@ -136,7 +163,7 @@ def download_job(job_id: str) -> FileResponse:
     if snapshot.status != "succeeded" or package_path is None or not package_path.exists():
         raise HTTPException(status_code=409, detail="ZIP package is not ready yet")
 
-    filename = f"agentic_loss_recovery_{snapshot.start_date}_to_{snapshot.end_date}.zip"
+    filename = f"agentic_loss_recovery_{job_download_range_label(snapshot)}.zip"
     return FileResponse(package_path, media_type="application/zip", filename=filename)
 
 
@@ -203,7 +230,7 @@ def download_category_outputs(job_id: str) -> FileResponse:
     if written == 0 or not zip_path.exists():
         raise HTTPException(status_code=409, detail="Category Excel files are not ready yet")
 
-    filename = f"category_outputs_{snapshot.start_date}_to_{snapshot.end_date}.zip"
+    filename = f"category_outputs_{job_download_range_label(snapshot)}.zip"
     return FileResponse(zip_path, media_type="application/zip", filename=filename)
 
 
@@ -341,7 +368,9 @@ def get_agent_case(job_id: str, booking_id: str) -> dict[str, Any]:
 def list_edit_cases(
     job_id: str,
     page: int = Query(1, ge=1),
-    bucket: str | None = Query(None, pattern="^(needs_check|auto_approved)$"),
+    bucket: str | None = Query(None, pattern="^(needs_check|auto_approved|unhandled)$"),
+    booking_id: str | None = Query(None),
+    sub_category: str | None = Query(None),
 ) -> EditCasesPageResponse:
     try:
         snapshot = job_store.snapshot(job_id)
@@ -352,9 +381,12 @@ def list_edit_cases(
     if snapshot.status not in {"awaiting_edit", "succeeded"}:
         raise HTTPException(status_code=409, detail="Edit workspace is not ready yet")
 
-    filtered = cases
-    if bucket:
-        filtered = [case for case in cases if case.get("ai_bucket") == bucket]
+    filtered = filter_edit_cases(
+        cases,
+        bucket=bucket,
+        booking_id=booking_id,
+        sub_category=sub_category,
+    )
     counts = edit_metrics(cases)
     page_cases, safe_page, total_pages = paginate_items(filtered, page=page, page_size=AGENT_PAGE_SIZE)
     return EditCasesPageResponse(
@@ -365,8 +397,10 @@ def list_edit_cases(
         total_pages=total_pages,
         needs_check_count=counts["needs_check_count"],
         auto_approved_count=counts["auto_approved_count"],
+        unhandled_count=counts["unhandled_count"],
         edited_case_count=counts["edited_case_count"],
         excluded_case_count=counts["excluded_case_count"],
+        available_sub_categories=distinct_edit_sub_categories(cases),
     )
 
 
@@ -636,6 +670,7 @@ async def run_processing_job(
     start_date: str,
     end_date: str,
     job_dir: Path,
+    process_all: bool = False,
 ) -> None:
     def _init_category_and_investigation(categories: list[dict[str, Any]]) -> None:
         job_store.initialize_category_progress(job_id, categories)
@@ -652,6 +687,7 @@ async def run_processing_job(
             output_package_path=job_dir / PACKAGE_FILENAME,
             start_date=start_date,
             end_date=end_date,
+            process_all=process_all,
             on_step_start=lambda step_id, message: job_store.mark_step_running(job_id, step_id, message),
             on_step_complete=lambda step_id, message: job_store.mark_step_completed(job_id, step_id, message),
             on_warning=lambda warning: job_store.add_warning(job_id, warning),

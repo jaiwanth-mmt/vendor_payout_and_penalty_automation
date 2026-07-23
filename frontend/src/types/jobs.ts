@@ -1,7 +1,7 @@
 export type StepStatus = "pending" | "running" | "completed" | "warning" | "failed";
 export type JobStatus = "queued" | "running" | "awaiting_edit" | "awaiting_review" | "succeeded" | "failed";
 export type EditOutcome = "include" | "needs_ops" | "exclude";
-export type AiBucket = "needs_check" | "auto_approved";
+export type AiBucket = "needs_check" | "auto_approved" | "unhandled";
 
 export type StepState = {
   id: string;
@@ -136,6 +136,7 @@ export type AgentSummary = {
   excluded_case_count?: number;
   needs_check_count?: number;
   auto_approved_count?: number;
+  unhandled_count?: number;
 };
 
 export type VendorSubcategorySummary = {
@@ -248,15 +249,6 @@ export type ReviewQueuePageResponse = {
   total_pages: number;
 };
 
-export type CabDelayProgress = {
-  target_insight_rows: number;
-  generated_insight_rows: number;
-  failed_insight_rows: number;
-  target_comment_summary_rows: number;
-  generated_comment_summary_rows: number;
-  failed_comment_summary_rows: number;
-};
-
 export type CategoryProgress = {
   name: string;
   slug: string;
@@ -265,7 +257,6 @@ export type CategoryProgress = {
   message: string;
   started_at: string | null;
   completed_at: string | null;
-  cab_delay: CabDelayProgress | null;
 };
 
 export type JobResponse = {
@@ -275,6 +266,7 @@ export type JobResponse = {
   original_filename: string;
   start_date: string;
   end_date: string;
+  process_all: boolean;
   created_at: string;
   updated_at: string;
   steps: StepState[];
@@ -339,8 +331,10 @@ export type EditCasesPageResponse = {
   total_pages: number;
   needs_check_count: number;
   auto_approved_count: number;
+  unhandled_count: number;
   edited_case_count: number;
   excluded_case_count: number;
+  available_sub_categories: string[];
 };
 
 export type PatchEditCaseRequest = {

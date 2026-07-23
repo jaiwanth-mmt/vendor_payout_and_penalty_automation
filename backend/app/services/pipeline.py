@@ -20,13 +20,9 @@ from backend.app.agents.runner import run_portfolio_for_job
 from backend.app.integrations.llm_client import call_azure_openai_async
 from backend.app.integrations.tracking import TrackingRepository, matched_booking_ids
 from backend.app.domain.category_processors import (
-    CAB_DELAY_CATEGORY,
-    CAB_DELAY_OUTPUT_COLUMNS,
     COMMON_PROCESSED_OUTPUT_COLUMNS,
     CategoryProcessingOutcome,
-    InsightSummary,
     LlmGenerator,
-    cab_delay_progress_payload,
     enrich_message_column_async,
     process_category_batch_async,
 )
@@ -35,6 +31,7 @@ from backend.app.domain.penalty_dataset import (
     FINAL_OUTPUT_COLUMNS,
     clean_output_text_columns,
     consolidate_duplicate_bookings,
+    drop_excluded_subcategories,
     filter_by_input_date_range,
     keep_only_carbd_loss_dept,
     normalize_numeric_columns,
@@ -138,6 +135,7 @@ def process_uploaded_workbook(
     output_package_path: Path,
     start_date: str,
     end_date: str,
+    process_all: bool = False,
     on_step_start: ProgressCallback,
     on_step_complete: ProgressCallback,
     on_warning: WarningCallback,
@@ -159,6 +157,7 @@ def process_uploaded_workbook(
             output_package_path=output_package_path,
             start_date=start_date,
             end_date=end_date,
+            process_all=process_all,
             on_step_start=on_step_start,
             on_step_complete=on_step_complete,
             on_warning=on_warning,
@@ -183,6 +182,7 @@ async def process_uploaded_workbook_async(
     output_package_path: Path,
     start_date: str,
     end_date: str,
+    process_all: bool = False,
     on_step_start: ProgressCallback,
     on_step_complete: ProgressCallback,
     on_warning: WarningCallback,
@@ -227,12 +227,28 @@ async def process_uploaded_workbook_async(
     validate_input_columns(raw_df)
     on_step_complete("workbook_parsed", f"{len(raw_df):,} workbook rows read")
 
-    on_step_start(
-        "date_filtered",
-        f"Filtering {DEFAULT_DATE_COLUMN} for {start_date} to {end_date}",
-    )
-    date_filtered_df = filter_by_input_date_range(raw_df, DEFAULT_DATE_COLUMN, start_date, end_date)
-    on_step_complete("date_filtered", f"{len(date_filtered_df):,} rows match the selected date range")
+    if process_all:
+        on_step_start(
+            "date_filtered",
+            f"Skipping {DEFAULT_DATE_COLUMN} filter — processing entire workbook",
+        )
+        date_filtered_df = raw_df.copy()
+        on_step_complete(
+            "date_filtered",
+            f"{len(date_filtered_df):,} workbook rows kept (no date filter)",
+        )
+    else:
+        on_step_start(
+            "date_filtered",
+            f"Filtering {DEFAULT_DATE_COLUMN} for {start_date} to {end_date}",
+        )
+        date_filtered_df = filter_by_input_date_range(
+            raw_df, DEFAULT_DATE_COLUMN, start_date, end_date
+        )
+        on_step_complete(
+            "date_filtered",
+            f"{len(date_filtered_df):,} rows match the selected approval date range",
+        )
 
     on_step_start("filters_applied", "Keeping CARBD rows with non-zero recoverable amount")
     carbd_df = keep_only_carbd_loss_dept(date_filtered_df)
@@ -241,13 +257,19 @@ async def process_uploaded_workbook_async(
         ["Loss Amount", "Loss Amount (INR)", "Recoverable", "Recoverable (INR)"],
     )
     recoverable_df = remove_zero_recoverable_rows(normalized_df)
+    subcategory_filtered_df = drop_excluded_subcategories(recoverable_df)
+    excluded_subcategory_rows = len(recoverable_df) - len(subcategory_filtered_df)
     on_step_complete(
         "filters_applied",
-        f"{len(recoverable_df):,} rows remain after CARBD and recoverable filters",
+        (
+            f"{len(subcategory_filtered_df):,} rows remain after CARBD, recoverable, "
+            f"and subcategory filters"
+            + (f" ({excluded_subcategory_rows:,} excluded subcategories dropped)" if excluded_subcategory_rows else "")
+        ),
     )
 
     on_step_start("duplicates_consolidated", "Merging repeated Booking IDs")
-    consolidated_df = consolidate_duplicate_bookings(recoverable_df)
+    consolidated_df = consolidate_duplicate_bookings(subcategory_filtered_df)
     prepared_df = shape_prepared_output(consolidated_df)
     on_step_complete("duplicates_consolidated", f"{len(prepared_df):,} unique bookings prepared")
 
@@ -302,7 +324,6 @@ async def process_uploaded_workbook_async(
     category_outputs: list[dict[str, Any] | None] = [None] * len(category_batches)
     processed_category_frames: list[pd.DataFrame | None] = [None] * len(category_batches)
     agent_cases_by_category: list[list[dict[str, Any]] | None] = [None] * len(category_batches)
-    cab_delay_summary = InsightSummary()
     completed_categories = 0
 
     semaphore = asyncio.Semaphore(category_concurrency)
@@ -332,8 +353,6 @@ async def process_uploaded_workbook_async(
         category_outputs[index] = category_output
         processed_category_frames[index] = outcome.df
         agent_cases_by_category[index] = outcome.agent_cases
-        if outcome.insight_summary:
-            cab_delay_summary = outcome.insight_summary
         for warning in category_warnings:
             emit_warning(warning)
 
@@ -364,20 +383,14 @@ async def process_uploaded_workbook_async(
     metrics = {
         "raw_rows": len(raw_df),
         "date_filtered_rows": len(date_filtered_df),
+        "process_all": int(process_all),
         "carbd_rows": len(carbd_df),
         "recoverable_rows": len(recoverable_df),
+        "excluded_subcategory_rows": excluded_subcategory_rows,
         "prepared_rows": len(prepared_df),
         "category_count": len(finalized_category_outputs),
         "tracking_matched_bookings": len(matched_ids),
         "tracking_unmatched_bookings": len(unmatched_booking_ids),
-        "target_insight_rows": cab_delay_summary.target_insight_rows,
-        "existing_insight_rows": cab_delay_summary.existing_insight_rows,
-        "generated_insight_rows": cab_delay_summary.generated_insight_rows,
-        "failed_insight_rows": cab_delay_summary.failed_insight_rows,
-        "target_comment_summary_rows": cab_delay_summary.target_comment_summary_rows,
-        "existing_comment_summary_rows": cab_delay_summary.existing_comment_summary_rows,
-        "generated_comment_summary_rows": cab_delay_summary.generated_comment_summary_rows,
-        "failed_comment_summary_rows": cab_delay_summary.failed_comment_summary_rows,
         "agent_total_cases": case_counts["total_cases"],
         "agent_auto_ready_cases": case_counts["auto_ready"],
         "agent_needs_review_cases": case_counts["needs_review"],
@@ -386,6 +399,7 @@ async def process_uploaded_workbook_async(
         "agent_failed_cases": case_counts["failed"],
         "needs_check_count": edit_counts["needs_check_count"],
         "auto_approved_count": edit_counts["auto_approved_count"],
+        "unhandled_count": edit_counts["unhandled_count"],
         "edited_case_count": 0,
         "excluded_case_count": 0,
         "pending_human_reviews": 0,
@@ -427,7 +441,6 @@ async def finalize_pipeline_package(
     finalized_category_outputs: list[dict[str, Any]],
     processed_category_frames: list[pd.DataFrame | None],
     agent_cases: list[dict[str, Any]],
-    cab_delay_summary: InsightSummary,
     matched_ids: list[str],
     unmatched_booking_ids: list[str],
     warnings: list[dict[str, Any]],
@@ -481,6 +494,7 @@ async def finalize_pipeline_package(
     manifest = build_manifest(
         start_date=start_date,
         end_date=end_date,
+        process_all=False,
         raw_rows=len(raw_df),
         prepared_rows=len(prepared_df),
         categories=finalized_category_outputs,
@@ -513,14 +527,6 @@ async def finalize_pipeline_package(
         "final_output_rows": len(final_output_df),
         "tracking_matched_bookings": len(matched_ids),
         "tracking_unmatched_bookings": len(unmatched_booking_ids),
-        "target_insight_rows": cab_delay_summary.target_insight_rows,
-        "existing_insight_rows": cab_delay_summary.existing_insight_rows,
-        "generated_insight_rows": cab_delay_summary.generated_insight_rows,
-        "failed_insight_rows": cab_delay_summary.failed_insight_rows,
-        "target_comment_summary_rows": cab_delay_summary.target_comment_summary_rows,
-        "existing_comment_summary_rows": cab_delay_summary.existing_comment_summary_rows,
-        "generated_comment_summary_rows": cab_delay_summary.generated_comment_summary_rows,
-        "failed_comment_summary_rows": cab_delay_summary.failed_comment_summary_rows,
         "agent_total_cases": case_counts["total_cases"],
         "agent_auto_ready_cases": case_counts["auto_ready"],
         "agent_needs_review_cases": case_counts["needs_review"],
@@ -640,6 +646,7 @@ async def apply_edits_and_package(
     manifest = build_manifest(
         start_date=start_date,
         end_date=end_date,
+        process_all=bool(metrics.get("process_all")),
         raw_rows=raw_rows,
         prepared_rows=prepared_rows,
         categories=updated_category_outputs,
@@ -676,6 +683,7 @@ async def apply_edits_and_package(
         "excluded_case_count": edit_counts["excluded_case_count"],
         "needs_check_count": edit_counts["needs_check_count"],
         "auto_approved_count": edit_counts["auto_approved_count"],
+        "unhandled_count": edit_counts["unhandled_count"],
         "pending_human_reviews": 0,
     }
     return {
@@ -760,7 +768,6 @@ def build_initial_category_progress(category_batches: list[CategoryBatch]) -> li
             "name": batch.name,
             "slug": batch.slug,
             "row_count": len(batch.df),
-            "cab_delay": cab_delay_progress_payload() if batch.name == CAB_DELAY_CATEGORY else None,
         }
         for batch in category_batches
     ]
@@ -795,10 +802,6 @@ async def process_category_for_package(
                 tracking_bookings=tracking_bookings,
                 llm_generator=llm_generator,
                 llm_concurrency=llm_concurrency,
-                on_cab_delay_progress=lambda counters, message: on_category_progress(
-                    batch.slug,
-                    {"message": message, "cab_delay": counters},
-                ),
                 job_id=job_id,
                 enable_hitl=enable_hitl,
                 on_agent_event=on_agent_event,
@@ -849,8 +852,6 @@ async def process_category_for_package(
             error=outcome.error,
         )
 
-        if outcome.insight_summary:
-            warnings.extend(outcome.insight_summary.warnings)
         warnings.extend(outcome.warnings)
 
         status = "failed" if outcome.failed else "completed"

@@ -47,6 +47,7 @@ _ALIASES = {
     "air conditioner not working": "AC Not Working",
     "accident": "Accident on the Way",
     "accident on way": "Accident on the Way",
+    "accidental case": "Accident on the Way",
     "bad driver behavior": "Bad Driver Behaviour/Skill",
     "bad driver behaviour": "Bad Driver Behaviour/Skill",
     "driver behavior": "Bad Driver Behaviour/Skill",

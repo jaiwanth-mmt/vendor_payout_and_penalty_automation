@@ -2,7 +2,6 @@ import { AlertTriangle, CheckCircle2, ListChecks, LoaderCircle, Table2, XCircle 
 import { useState } from "react";
 
 import type {
-  CabDelayProgress,
   CategoryProgress,
   GraphEvent,
   InvestigationSummary,
@@ -261,7 +260,6 @@ function CategoryProgressList({ categories }: { categories: CategoryProgress[] }
             <div>
               <span>{category.name}</span>
               <p>{category.message}</p>
-              {category.cab_delay && <CabDelayCounters counters={category.cab_delay} />}
             </div>
             <div className="categoryStatusBlock">
               <strong>{category.row_count}</strong>
@@ -270,21 +268,6 @@ function CategoryProgressList({ categories }: { categories: CategoryProgress[] }
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function CabDelayCounters({ counters }: { counters: CabDelayProgress }) {
-  const insightDone = counters.generated_insight_rows + counters.failed_insight_rows;
-  const summaryDone = counters.generated_comment_summary_rows + counters.failed_comment_summary_rows;
-  return (
-    <div className="cabDelayCounters">
-      <span>
-        Insights {insightDone}/{counters.target_insight_rows}
-      </span>
-      <span>
-        Summaries {summaryDone}/{counters.target_comment_summary_rows}
-      </span>
     </div>
   );
 }

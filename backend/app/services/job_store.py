@@ -12,7 +12,7 @@ from backend.app.models import JobResponse, PendingInterrupt, WarningItem
 STEP_DEFINITIONS: list[tuple[str, str]] = [
     ("upload_received", "Upload received"),
     ("workbook_parsed", "Workbook parsed"),
-    ("date_filtered", "Date filtered"),
+    ("date_filtered", "Approval date filtered"),
     ("filters_applied", "CARBD and recoverable filters applied"),
     ("duplicates_consolidated", "Duplicate bookings consolidated"),
     ("categories_split", "Subcategories split"),
@@ -160,6 +160,7 @@ class JobStore:
         end_date: str,
         job_dir: Path,
         upload_path: Path,
+        process_all: bool = False,
     ) -> None:
         now = utc_now()
         with self._lock:
@@ -170,6 +171,7 @@ class JobStore:
                 "original_filename": original_filename,
                 "start_date": start_date,
                 "end_date": end_date,
+                "process_all": process_all,
                 "created_at": now,
                 "updated_at": now,
                 "job_dir": job_dir,
@@ -269,7 +271,6 @@ class JobStore:
                     "message": "Waiting to process",
                     "started_at": None,
                     "completed_at": None,
-                    "cab_delay": category.get("cab_delay"),
                 }
                 for category in categories
             ]
@@ -282,7 +283,6 @@ class JobStore:
         *,
         status: str | None = None,
         message: str | None = None,
-        cab_delay: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             job = self._get_job(job_id)
@@ -300,10 +300,6 @@ class JobStore:
                         category["completed_at"] = now
                 if message is not None:
                     category["message"] = message
-                if cab_delay is not None:
-                    current = category.get("cab_delay") or {}
-                    current.update(cab_delay)
-                    category["cab_delay"] = current
                 break
             job["updated_at"] = now
 
@@ -436,10 +432,18 @@ class JobStore:
             step = self._get_step(job, "agent_investigation")
             step["status"] = "warning"
             needs_check = sum(1 for case in agent_cases if case.get("ai_bucket") == "needs_check")
+            unhandled = sum(1 for case in agent_cases if case.get("ai_bucket") == "unhandled")
+            suffix_parts: list[str] = []
+            if needs_check:
+                suffix_parts.append(f"{needs_check} need your check")
+            if unhandled:
+                suffix_parts.append(f"{unhandled} unique categories")
+            suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
+            status_line = (job.get("investigation_summary") or {}).get("status_line")
             step["message"] = (
-                (job.get("investigation_summary") or {}).get("status_line")
-                or f"Investigation complete — {len(agent_cases)} cases ready to edit"
-                + (f" ({needs_check} need your check)" if needs_check else "")
+                f"{status_line}{suffix}"
+                if status_line
+                else f"Investigation complete — {len(agent_cases)} cases ready to edit{suffix}"
             )
             step["started_at"] = step["started_at"] or now
 

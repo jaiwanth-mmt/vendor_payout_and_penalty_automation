@@ -5,6 +5,7 @@ from backend.app.domain.complaint_message import (
     build_message_from_response,
     classify_cab_delay_window,
     format_message_categories,
+    map_complaint_labels,
     parse_message_categories,
 )
 
@@ -38,6 +39,8 @@ def test_fallback_maps_local_subcategory_names_to_allowed_categories() -> None:
         build_fallback_message(sub_category="Driver Behavior", remarks="", comments="")
         == "Bad Driver Behaviour/Skill"
     )
+    assert map_complaint_labels("Accidental Case") == ["Accident on the Way"]
+    assert map_complaint_labels("Brand New Penalty Type") == []
 
 
 def test_cab_delay_window_selection_is_text_only() -> None:

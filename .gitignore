@@ -11,3 +11,4 @@ frontend/dist/
 frontend/node_modules/.tmp/
 *.tsbuildinfo
 graphify-out/
+data/

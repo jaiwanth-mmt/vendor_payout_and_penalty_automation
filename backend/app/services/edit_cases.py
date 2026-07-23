@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from backend.app.agents.models import clean_number, clean_text
+from backend.app.domain.complaint_message import map_complaint_labels
 
 
 EditOutcome = Literal["include", "needs_ops", "exclude"]
-AiBucket = Literal["needs_check", "auto_approved"]
+AiBucket = Literal["needs_check", "auto_approved", "unhandled"]
 
 EDIT_OUTCOMES: frozenset[str] = frozenset({"include", "needs_ops", "exclude"})
 AUTO_APPROVED_STATUSES: frozenset[str] = frozenset({"auto_ready"})
@@ -17,7 +18,23 @@ NEEDS_CHECK_STATUSES: frozenset[str] = frozenset(
 )
 
 
+def is_unhandled_sub_category(sub_category: object) -> bool:
+    """True when Sub Category does not map into ALLOWED_COMPLAINT_CATEGORIES (+ aliases)."""
+    return not map_complaint_labels(sub_category)
+
+
+def ai_bucket_for_case(*, review_status: str, sub_category: str) -> AiBucket:
+    """Assign edit-stage bucket: unhandled overrides investigation status."""
+    if is_unhandled_sub_category(sub_category):
+        return "unhandled"
+    status = clean_text(review_status) or "failed"
+    if status in AUTO_APPROVED_STATUSES:
+        return "auto_approved"
+    return "needs_check"
+
+
 def ai_bucket_for_status(review_status: str) -> AiBucket:
+    """Map investigation review_status only (no Sub Category check). Prefer ai_bucket_for_case."""
     status = clean_text(review_status) or "failed"
     if status in AUTO_APPROVED_STATUSES:
         return "auto_approved"
@@ -32,13 +49,12 @@ def prepare_case_for_edit(case: dict[str, Any]) -> dict[str, Any]:
     """Attach immutable AI labels + editable snapshot fields for the edit workspace."""
     enriched = dict(case)
     review_status = clean_text(enriched.get("review_status")) or "failed"
-    ai_bucket = ai_bucket_for_status(review_status)
-    outcome = default_edit_outcome(ai_bucket)
-
     recoverable = round(clean_number(enriched.get("recoverable_amount")), 2)
     message = clean_text(enriched.get("message"))
     remarks = clean_text(enriched.get("remarks"))
     sub_category = clean_text(enriched.get("sub_category")) or "Uncategorized"
+    ai_bucket = ai_bucket_for_case(review_status=review_status, sub_category=sub_category)
+    outcome = default_edit_outcome(ai_bucket)
 
     enriched["ai_bucket"] = ai_bucket
     enriched["ai_review_status"] = review_status
@@ -121,13 +137,16 @@ def patch_edit_case(case: dict[str, Any], patch: dict[str, Any]) -> dict[str, An
 def apply_edit_outcome_to_case(case: dict[str, Any]) -> dict[str, Any]:
     """Map edit outcome onto review_status / final_decision before portfolio."""
     applied = dict(case)
+    sub_category = clean_text(applied.get("sub_category")) or "Uncategorized"
     outcome = clean_text(applied.get("edit_outcome")) or default_edit_outcome(
-        ai_bucket_for_status(clean_text(applied.get("ai_review_status")) or "failed")
+        ai_bucket_for_case(
+            review_status=clean_text(applied.get("ai_review_status")) or "failed",
+            sub_category=sub_category,
+        )
     )
     recoverable = round(clean_number(applied.get("recoverable_amount")), 2)
     message = clean_text(applied.get("message"))
     remarks = clean_text(applied.get("remarks"))
-    sub_category = clean_text(applied.get("sub_category")) or "Uncategorized"
 
     applied["recoverable_amount"] = recoverable
     applied["message"] = message
@@ -189,7 +208,43 @@ def edit_metrics(cases: list[dict[str, Any]]) -> dict[str, int]:
         "excluded_case_count": sum(1 for case in cases if case.get("excluded") or case.get("edit_outcome") == "exclude"),
         "needs_check_count": sum(1 for case in cases if case.get("ai_bucket") == "needs_check"),
         "auto_approved_count": sum(1 for case in cases if case.get("ai_bucket") == "auto_approved"),
+        "unhandled_count": sum(1 for case in cases if case.get("ai_bucket") == "unhandled"),
     }
+
+
+def distinct_edit_sub_categories(cases: list[dict[str, Any]]) -> list[str]:
+    """Sorted unique sub categories from edit cases (for filter dropdown)."""
+    names = {
+        clean_text(case.get("sub_category")) or "Uncategorized" for case in cases
+    }
+    return sorted(names)
+
+
+def filter_edit_cases(
+    cases: list[dict[str, Any]],
+    *,
+    bucket: str | None = None,
+    booking_id: str | None = None,
+    sub_category: str | None = None,
+) -> list[dict[str, Any]]:
+    """Filter edit cases by AI bucket, exact booking ID, and/or exact sub category."""
+    booking_filter = clean_text(booking_id)
+    sub_category_filter = clean_text(sub_category)
+
+    filtered = cases
+    if bucket:
+        filtered = [case for case in filtered if case.get("ai_bucket") == bucket]
+    if booking_filter:
+        filtered = [
+            case for case in filtered if clean_text(case.get("booking_id")) == booking_filter
+        ]
+    if sub_category_filter:
+        filtered = [
+            case
+            for case in filtered
+            if (clean_text(case.get("sub_category")) or "Uncategorized") == sub_category_filter
+        ]
+    return filtered
 
 
 def cases_for_portfolio(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -208,16 +263,19 @@ def cases_for_portfolio(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def edit_case_api_view(case: dict[str, Any]) -> dict[str, Any]:
     """Lean payload for the non-tech edit UI."""
     final = case.get("final_decision") or {}
+    sub_category = clean_text(case.get("sub_category")) or "Uncategorized"
+    review_status = clean_text(case.get("ai_review_status") or case.get("review_status"))
     return {
         "booking_id": clean_text(case.get("booking_id")),
         "comments": clean_text(case.get("comments")),
         "recoverable_amount": round(clean_number(case.get("recoverable_amount")), 2),
         "message": clean_text(case.get("message")),
         "remarks": clean_text(case.get("remarks")),
-        "sub_category": clean_text(case.get("sub_category")) or "Uncategorized",
+        "sub_category": sub_category,
         "vendor_name": clean_text(case.get("vendor_name")) or "Unknown vendor",
-        "ai_bucket": case.get("ai_bucket") or ai_bucket_for_status(clean_text(case.get("review_status"))),
-        "ai_review_status": clean_text(case.get("ai_review_status") or case.get("review_status")),
+        "ai_bucket": case.get("ai_bucket")
+        or ai_bucket_for_case(review_status=review_status, sub_category=sub_category),
+        "ai_review_status": review_status,
         "edit_outcome": clean_text(case.get("edit_outcome")) or "needs_ops",
         "was_edited": bool(case.get("was_edited")),
         "edited_fields": list(case.get("edited_fields") or []),

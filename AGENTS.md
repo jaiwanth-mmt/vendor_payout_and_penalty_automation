@@ -10,9 +10,9 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - `backend/app/services/edit_cases.py`: edit snapshots, PATCH validation, outcome → review_status mapping.
 - `backend/app/services/package_builder.py`: XLSX, manifest, ZIP, preview payloads; applies edits onto processed frames.
 - `backend/app/services/job_store.py`: in-memory job lifecycle/progress (`awaiting_edit`, `investigation_summary`, short graph-event retention).
-- `backend/app/domain/penalty_dataset.py`: workbook filter (date range), CARBD/recoverable filters, dedupe, shape.
+- `backend/app/domain/penalty_dataset.py`: workbook filter (date range), CARBD/recoverable filters, drop User cancellation / Customer Delight, dedupe, shape.
 - `backend/app/domain/subcategories.py`: cleaned subcategory names, slugs, split.
-- `backend/app/domain/category_processors.py`: **processor registry** (`CATEGORY_ASYNC_ENRICHERS`) + message/Cab Delay LLM loops; calls LangGraph runner after enrichers.
+- `backend/app/domain/category_processors.py`: **processor registry** (`CATEGORY_ASYNC_ENRICHERS`) + message LLM loops; calls LangGraph runner after enrichers.
 - `backend/app/domain/`: category enrichers (`cab_delay_enrichment`, `extra_money_taken`, `fulfillment_not_done`, `lower_category_vehicle`, `tracking_common`, `complaint_message`).
 - `backend/app/core/tracking_utils.py`: shared tracking dict access + time formatting (do **not** put these in Cab Delay).
 - `backend/app/core/paths.py` / `env.py`: repo paths and `.env` loading (`LANGGRAPH_RUNTIME_ROOT`).
@@ -33,8 +33,8 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - Frontend build: `cd frontend && npm run build`
 
 ## Data Flow
-1. `POST /api/jobs` with `file`, `start_date`, `end_date` (YYYY-MM-DD, inclusive).
-2. Filter `Approval/Rejected DateTime` to that range → CARBD → non-zero Recoverable → dedupe → prepared columns.
+1. `POST /api/jobs` with `file` plus either `start_date`/`end_date` (YYYY-MM-DD, inclusive) **or** `process_all=true`.
+2. Filter `Approval/Rejected DateTime` to that range (skip when `process_all`) → CARBD → non-zero Recoverable → **drop User cancellation / Customer Delight** (case-insensitive; no penalty) → dedupe → prepared columns.
 3. Split prepared rows by cleaned `Sub Category`.
 4. Live tracking for prepared Booking IDs (`order_reference_number`):
    - MySQL `tracking_reports_raw`
@@ -42,7 +42,7 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
    - Redash call comments when `REDASH_API_KEY` is set
 5. Registry-dispatched category enrichers + `message` column.
 6. LangGraph per-case investigation with **`enable_hitl=False`** (judge labels still set; no interrupt pause).
-7. Job status → **`awaiting_edit`**. Humans edit recoverable / message / remarks / sub_category and set Include / Needs ops / Exclude (booking ID + call comments read-only).
+7. Job status → **`awaiting_edit`**. Edit buckets: **Needs check** / **New–unique categories** (Sub Category not mappable via `ALLOWED_COMPLAINT_CATEGORIES` + aliases in `complaint_message.py`) / **AI auto-approved**. Humans edit recoverable / message / remarks / sub_category and set Include / Needs ops / Exclude (booking ID + call comments read-only). Unique categories still get tracking + investigation and appear in category previews/ZIP when included.
 8. `POST /api/jobs/{id}/approve-edits` → rewrite processed XLSX → portfolio → ZIP → `succeeded`.
 9. Review UI shows analysis only (top vendors, totals); Outputs for downloads.
 

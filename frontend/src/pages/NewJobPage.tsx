@@ -1,5 +1,5 @@
 /**
- * NewJobPage — upload + date range, then navigate to /jobs/:id.
+ * NewJobPage — upload + approval date range (or entire workbook), then navigate to /jobs/:id.
  * Two top-aligned surfaces in the same .workspace grid as Progress.
  */
 import { ClipboardCheck, FileSpreadsheet, Package, Radar, Sparkles } from "lucide-react";
@@ -11,7 +11,7 @@ const NEXT_STEPS = [
   {
     icon: FileSpreadsheet,
     title: "Filter & prepare",
-    body: "Approval date range, CARBD, recoverable amount, and Booking ID dedupe.",
+    body: "Approval date range (or whole sheet), CARBD, recoverable amount, and Booking ID dedupe.",
   },
   {
     icon: Radar,
@@ -38,6 +38,8 @@ export default function NewJobPage() {
     setStartDate,
     endDate,
     setEndDate,
+    processAll,
+    setProcessAll,
     isSubmitting,
     error,
     setError,
@@ -53,7 +55,7 @@ export default function NewJobPage() {
     <div className="pageFrame">
       <header className="newJobPageHeader">
         <h2>Start a recovery run</h2>
-        <p>Upload a QlikSense workbook and approval date range to begin.</p>
+        <p>Upload a QlikSense workbook, then filter by approval date or process the whole sheet.</p>
       </header>
 
       <div className="workspace newJobWorkspace">
@@ -61,11 +63,13 @@ export default function NewJobPage() {
           selectedFile={selectedFile}
           startDate={startDate}
           endDate={endDate}
+          processAll={processAll}
           isProcessing={isSubmitting}
           error={error}
           onFileSelect={handleFileSelect}
           onStartDateChange={setStartDate}
           onEndDateChange={setEndDate}
+          onProcessAllChange={setProcessAll}
           onSubmit={submitJob}
         />
 

@@ -11,7 +11,13 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from backend.app import main
-from backend.app.domain.cab_delay_enrichment import INCABS_COMMENT_SUMMARY_COLUMN, INCABS_INSIGHT_COLUMN
+from backend.app.domain.cab_delay_enrichment import (
+    BOARDED_COLUMN,
+    COMMENTS_COLUMN,
+    DRIVER_ARRIVED_COLUMN,
+    DRIVER_STARTED_COLUMN,
+    PREFERRED_START_TIME_IST_COLUMN,
+)
 from backend.app.domain.complaint_message import MESSAGE_COLUMN
 from backend.app.domain.tracking_common import (
     COMPLAINT_AGAINST_COLUMN,
@@ -112,9 +118,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
             )
         if "Complaint category classification task." in prompt:
             return '{"categories": ["Cab Delay"]}'
-        if "Customer call comment:" in prompt:
-            return "API mock combined summary."
-        return "API mock Incabs insight."
+        return "API mock unused enrichment text."
 
     monkeypatch.setattr("backend.app.services.pipeline.call_azure_openai_async", mock_azure)
 
@@ -139,6 +143,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert status_response.status_code == 200
         payload = status_response.json()
         assert payload["status"] == "awaiting_edit"
+        assert payload["process_all"] is False
         assert payload["metrics"]["prepared_rows"] == 1
         assert payload["metrics"]["category_count"] == 1
         assert payload["case_counts"]["total_cases"] == 1
@@ -148,6 +153,39 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         edit_payload = edit_list.json()
         assert edit_payload["case_count"] == 1
         assert edit_payload["cases"][0]["booking_id"] == "B1"
+        assert edit_payload["available_sub_categories"] == ["Cab Delay"]
+
+        edit_by_booking = client.get(
+            f"/api/jobs/{job_id}/edit-cases",
+            params={"page": 1, "booking_id": " B1 "},
+        )
+        assert edit_by_booking.status_code == 200
+        assert edit_by_booking.json()["case_count"] == 1
+        assert edit_by_booking.json()["cases"][0]["booking_id"] == "B1"
+
+        edit_missing = client.get(
+            f"/api/jobs/{job_id}/edit-cases",
+            params={"page": 1, "booking_id": "missing"},
+        )
+        assert edit_missing.status_code == 200
+        assert edit_missing.json()["case_count"] == 0
+        assert edit_missing.json()["cases"] == []
+        assert edit_missing.json()["available_sub_categories"] == ["Cab Delay"]
+
+        edit_by_sub = client.get(
+            f"/api/jobs/{job_id}/edit-cases",
+            params={"page": 1, "sub_category": "Cab Delay"},
+        )
+        assert edit_by_sub.status_code == 200
+        assert edit_by_sub.json()["case_count"] == 1
+
+        edit_wrong_sub = client.get(
+            f"/api/jobs/{job_id}/edit-cases",
+            params={"page": 1, "sub_category": "Extra Money Taken"},
+        )
+        assert edit_wrong_sub.status_code == 200
+        assert edit_wrong_sub.json()["case_count"] == 0
+        assert edit_wrong_sub.json()["cases"] == []
 
         approve_response = client.post(f"/api/jobs/{job_id}/approve-edits")
         assert approve_response.status_code == 200
@@ -204,8 +242,7 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert category_step["total_units"] == 1
         assert payload["category_progress"][0]["name"] == "Cab Delay"
         assert payload["category_progress"][0]["status"] == "completed"
-        assert payload["category_progress"][0]["cab_delay"]["generated_insight_rows"] == 1
-        assert payload["category_progress"][0]["cab_delay"]["generated_comment_summary_rows"] == 1
+        assert "cab_delay" not in payload["category_progress"][0]
         assert payload["category_outputs"][0]["name"] == "Cab Delay"
         assert "preview_rows" not in payload["category_outputs"][0]
 
@@ -220,8 +257,13 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert category_preview_payload["rows"][0][COMPLAINT_AGAINST_ID_COLUMN] == "dispatch-b1"
         assert category_preview_payload["rows"][0][TITLE_COLUMN] == TITLE_VALUE
         assert category_preview_payload["rows"][0][VENDOR_NAME_COLUMN] == "savaari"
-        assert category_preview_payload["rows"][0][INCABS_INSIGHT_COLUMN] == "API mock Incabs insight."
-        assert category_preview_payload["rows"][0][INCABS_COMMENT_SUMMARY_COLUMN] == "API mock combined summary."
+        assert PREFERRED_START_TIME_IST_COLUMN in category_preview_payload["rows"][0]
+        assert DRIVER_STARTED_COLUMN in category_preview_payload["rows"][0]
+        assert DRIVER_ARRIVED_COLUMN in category_preview_payload["rows"][0]
+        assert BOARDED_COLUMN in category_preview_payload["rows"][0]
+        assert COMMENTS_COLUMN in category_preview_payload["rows"][0]
+        assert "insights from incabs data" not in category_preview_payload["rows"][0]
+        assert "incabs and customer comment summary" not in category_preview_payload["rows"][0]
         assert category_preview_payload["rows"][0][MESSAGE_COLUMN] == "Cab Delay"
         assert float(category_preview_payload["rows"][0]["Recoverable"]) == 250
 
