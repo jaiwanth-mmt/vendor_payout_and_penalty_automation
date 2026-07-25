@@ -1,5 +1,5 @@
 /**
- * JobReviewPage — analysis cockpit after edits are approved (no HITL Approve/Keep).
+ * JobReviewPage — aggregate recovery analysis after edits are approved.
  */
 import { ArrowRight, Clock3, Package } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -8,15 +8,7 @@ import AgentCockpit from "../components/agent";
 import { useJob } from "../context/JobProvider";
 
 export default function JobReviewPage() {
-  const {
-    jobId,
-    job,
-    showAgentWorkspace,
-    isComplete,
-    downloadAgentAudit,
-    downloadReviewQueue,
-    refreshJob,
-  } = useJob();
+  const { jobId, job, showAgentWorkspace, isComplete } = useJob();
 
   if (!showAgentWorkspace) {
     return (
@@ -24,7 +16,7 @@ export default function JobReviewPage() {
         <Clock3 size={22} />
         <div>
           <strong>Review unlocks after you approve edits</strong>
-          <p>Top vendors, totals, and case details appear once the recovery package is built.</p>
+          <p>Top vendors, totals, and recovery analysis appear once the recovery package is built.</p>
         </div>
         <Link className="ghostButton" to={`/jobs/${jobId}/edit`}>
           Back to edit
@@ -48,14 +40,7 @@ export default function JobReviewPage() {
           </Link>
         </div>
       )}
-      <AgentCockpit
-        job={job}
-        isWorkspaceReady={showAgentWorkspace}
-        onDownloadAgentAudit={downloadAgentAudit}
-        onDownloadReviewQueue={downloadReviewQueue}
-        onRefreshJob={refreshJob}
-        showDownloadActions={isComplete}
-      />
+      <AgentCockpit job={job} isWorkspaceReady={showAgentWorkspace} />
     </div>
   );
 }

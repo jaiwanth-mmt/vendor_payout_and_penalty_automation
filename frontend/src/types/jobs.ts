@@ -314,6 +314,10 @@ export type EditCaseItem = {
   remarks: string;
   sub_category: string;
   vendor_name: string;
+  amount?: number | null;
+  ttrip_type?: string;
+  fine_before_sop?: number | null;
+  fine_after_sop?: number | null;
   ai_bucket: AiBucket;
   ai_review_status: string;
   edit_outcome: EditOutcome;
@@ -343,4 +347,20 @@ export type PatchEditCaseRequest = {
   remarks?: string;
   sub_category?: string;
   edit_outcome?: EditOutcome;
+};
+
+export type BulkPatchEditCasesRequest = {
+  bucket: AiBucket;
+  edit_outcome: EditOutcome;
+  booking_id?: string;
+  sub_category?: string;
+};
+
+export type BulkPatchEditCasesResponse = {
+  updated_count: number;
+  needs_check_count: number;
+  auto_approved_count: number;
+  unhandled_count: number;
+  edited_case_count: number;
+  excluded_case_count: number;
 };

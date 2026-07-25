@@ -2949,7 +2949,8 @@ h2 {
   white-space: nowrap;
 }
 
-.editToolbar {
+.editToolbar,
+.editSectionToolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2958,6 +2959,10 @@ h2 {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
+}
+
+.editSectionToolbar {
+  margin-top: 2px;
 }
 
 .editSubcategoryFilter {
@@ -3005,10 +3010,42 @@ h2 {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.editBucketHeader > div:first-of-type,
+.editAutoHeader .editBucketToggle > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.editAutoHeader {
+  align-items: center;
+}
+
+.editAutoHeader .editBucketToggle {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.editBulkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.editBulkButton {
+  white-space: nowrap;
+  font-size: 0.82rem;
+  padding: 6px 10px;
 }
 
 button.editBucketToggle {
-  width: 100%;
+  width: auto;
   margin: 0;
   padding: 0;
   border: 0;
@@ -3017,6 +3054,10 @@ button.editBucketToggle {
   text-align: left;
   cursor: pointer;
   font: inherit;
+}
+
+.agentPanelWide {
+  width: 100%;
 }
 
 button.editBucketToggle:focus-visible {
@@ -3107,16 +3148,39 @@ button.editBucketToggle:focus-visible {
 
 .editFieldGrid {
   display: grid;
-  grid-template-columns: minmax(110px, 140px) minmax(160px, 1fr) minmax(240px, 1.15fr);
+  grid-template-columns: minmax(100px, 120px) minmax(100px, 120px) minmax(110px, 140px) minmax(140px, 1fr) minmax(220px, 1.1fr);
   grid-template-areas:
-    "fine sub outcome"
-    "message message remarks";
+    "amount trip fine sub outcome"
+    "message message message message remarks";
   gap: 8px 10px;
   align-items: end;
 }
 
+.editCaseCard[data-vendor-no-show="true"] .editFieldGrid {
+  grid-template-columns: minmax(90px, 110px) minmax(90px, 110px) minmax(110px, 130px) minmax(110px, 130px) minmax(130px, 1fr) minmax(200px, 1.05fr);
+  grid-template-areas:
+    "amount trip before after sub outcome"
+    "message message message message message remarks";
+}
+
+.editFieldAmount {
+  grid-area: amount;
+}
+
+.editFieldTripType {
+  grid-area: trip;
+}
+
+.editFieldBeforeSop {
+  grid-area: before;
+}
+
 .editFieldFine {
   grid-area: fine;
+}
+
+.editCaseCard[data-vendor-no-show="true"] .editFieldFine {
+  grid-area: after;
 }
 
 .editFieldSub {
@@ -3256,8 +3320,17 @@ button.editBucketToggle:focus-visible {
   .editFieldGrid {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
+      "amount trip"
       "fine sub"
       "outcome outcome"
+      "message remarks";
+  }
+
+  .editCaseCard[data-vendor-no-show="true"] .editFieldGrid {
+    grid-template-areas:
+      "amount trip"
+      "before after"
+      "sub outcome"
       "message remarks";
   }
 }
@@ -3265,7 +3338,8 @@ button.editBucketToggle:focus-visible {
 @media (max-width: 840px) {
   .editPageHeader,
   .editApproveBar,
-  .editToolbar {
+  .editToolbar,
+  .editSectionToolbar {
     flex-direction: column;
     align-items: stretch;
   }
@@ -3286,7 +3360,21 @@ button.editBucketToggle:focus-visible {
   .editFieldGrid {
     grid-template-columns: 1fr;
     grid-template-areas:
+      "amount"
+      "trip"
       "fine"
+      "sub"
+      "outcome"
+      "message"
+      "remarks";
+  }
+
+  .editCaseCard[data-vendor-no-show="true"] .editFieldGrid {
+    grid-template-areas:
+      "amount"
+      "trip"
+      "before"
+      "after"
       "sub"
       "outcome"
       "message"
