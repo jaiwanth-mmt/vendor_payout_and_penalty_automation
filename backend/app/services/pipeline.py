@@ -23,7 +23,7 @@ from backend.app.domain.category_processors import (
     COMMON_PROCESSED_OUTPUT_COLUMNS,
     CategoryProcessingOutcome,
     LlmGenerator,
-    enrich_message_column_async,
+    enrich_message_column,
     process_category_batch_async,
 )
 from backend.app.domain.penalty_dataset import (
@@ -31,6 +31,7 @@ from backend.app.domain.penalty_dataset import (
     FINAL_OUTPUT_COLUMNS,
     clean_output_text_columns,
     consolidate_duplicate_bookings,
+    drop_excluded_remarks,
     drop_excluded_subcategories,
     filter_by_input_date_range,
     keep_only_carbd_loss_dept,
@@ -259,17 +260,28 @@ async def process_uploaded_workbook_async(
     recoverable_df = remove_zero_recoverable_rows(normalized_df)
     subcategory_filtered_df = drop_excluded_subcategories(recoverable_df)
     excluded_subcategory_rows = len(recoverable_df) - len(subcategory_filtered_df)
+    remarks_filtered_df = drop_excluded_remarks(subcategory_filtered_df)
+    excluded_remarks_rows = len(subcategory_filtered_df) - len(remarks_filtered_df)
     on_step_complete(
         "filters_applied",
         (
-            f"{len(subcategory_filtered_df):,} rows remain after CARBD, recoverable, "
-            f"and subcategory filters"
-            + (f" ({excluded_subcategory_rows:,} excluded subcategories dropped)" if excluded_subcategory_rows else "")
+            f"{len(remarks_filtered_df):,} rows remain after CARBD, recoverable, "
+            f"subcategory, and remarks filters"
+            + (
+                f" ({excluded_subcategory_rows:,} excluded subcategories dropped)"
+                if excluded_subcategory_rows
+                else ""
+            )
+            + (
+                f" ({excluded_remarks_rows:,} paid-amount-refund remarks dropped)"
+                if excluded_remarks_rows
+                else ""
+            )
         ),
     )
 
     on_step_start("duplicates_consolidated", "Merging repeated Booking IDs")
-    consolidated_df = consolidate_duplicate_bookings(subcategory_filtered_df)
+    consolidated_df = consolidate_duplicate_bookings(remarks_filtered_df)
     prepared_df = shape_prepared_output(consolidated_df)
     on_step_complete("duplicates_consolidated", f"{len(prepared_df):,} unique bookings prepared")
 
@@ -387,6 +399,7 @@ async def process_uploaded_workbook_async(
         "carbd_rows": len(carbd_df),
         "recoverable_rows": len(recoverable_df),
         "excluded_subcategory_rows": excluded_subcategory_rows,
+        "excluded_remarks_rows": excluded_remarks_rows,
         "prepared_rows": len(prepared_df),
         "category_count": len(finalized_category_outputs),
         "tracking_matched_bookings": len(matched_ids),
@@ -808,11 +821,7 @@ async def process_category_for_package(
             )
         except Exception as error:
             fallback_df = enrich_common_tracking_fields(batch.df, tracking_bookings=tracking_bookings)
-            fallback_df = await enrich_message_column_async(
-                fallback_df,
-                llm_generator=llm_generator,
-                llm_concurrency=llm_concurrency,
-            )
+            fallback_df = enrich_message_column(fallback_df)
             fallback_df, agent_cases = await investigate_category_frame_async(
                 fallback_df,
                 tracking_bookings=tracking_bookings,

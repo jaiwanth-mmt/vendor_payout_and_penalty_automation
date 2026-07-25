@@ -27,6 +27,11 @@ class InvestigationState(TypedDict):
     message: str
     vendor_name: str
     recoverable_amount: float
+    amount: NotRequired[float | None]
+    ttrip_type: NotRequired[str]
+    fine_before_sop: NotRequired[float | None]
+    fine_after_sop: NotRequired[float | None]
+    sop_calculation_failed: NotRequired[bool]
     tracking_context: dict[str, Any]
     source_analysis: dict[str, Any]
     evidence: Annotated[list[dict[str, Any]], operator.add]
@@ -63,6 +68,11 @@ def empty_investigation_state(
     message: str,
     vendor_name: str,
     recoverable_amount: float,
+    amount: float | None = None,
+    ttrip_type: str = "",
+    fine_before_sop: float | None = None,
+    fine_after_sop: float | None = None,
+    sop_calculation_failed: bool = False,
     tracking_context: dict[str, Any] | None = None,
 ) -> InvestigationState:
     return {
@@ -76,6 +86,11 @@ def empty_investigation_state(
         "message": message,
         "vendor_name": vendor_name,
         "recoverable_amount": recoverable_amount,
+        "amount": amount,
+        "ttrip_type": ttrip_type,
+        "fine_before_sop": fine_before_sop,
+        "fine_after_sop": fine_after_sop,
+        "sop_calculation_failed": sop_calculation_failed,
         "tracking_context": tracking_context or {},
         "source_analysis": {},
         "evidence": [],

@@ -29,8 +29,31 @@ from backend.app.agents.state import empty_investigation_state
 from backend.app.agents.tools import build_tracking_context
 from backend.app.core.paths import LANGGRAPH_RUNTIME_ROOT
 from backend.app.domain.complaint_message import MESSAGE_COLUMN
+from backend.app.domain.fulfillment_not_done import (
+    FINE_AFTER_SOP_COLUMN,
+    FINE_BEFORE_SOP_COLUMN,
+    SOP_CALCULATION_FAILED_COLUMN,
+)
+from backend.app.domain.tracking_common import TTRIP_TYPE_COLUMN
 
 COMMENTS_COLUMN = "comments"
+
+
+def _optional_amount(value: Any) -> float | None:
+    text = clean_text(value)
+    if not text:
+        return None
+    amount = clean_number(value)
+    if amount != amount:
+        return None
+    return round(amount, 2)
+
+
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = clean_text(value).casefold()
+    return text in {"1", "true", "yes", "y"}
 
 # Process-local registries for resume / SSE (job_id scoped).
 _JOB_CHECKPOINTS: dict[str, Any] = {}
@@ -61,6 +84,11 @@ def build_claim_case(row: pd.Series, *, row_index: int) -> ClaimCase:
         comments=clean_text(row.get(COMMENTS_COLUMN)),
         message=clean_text(row.get(MESSAGE_COLUMN)),
         vendor_name=vendor_name,
+        amount=_optional_amount(row.get("amount")),
+        ttrip_type=clean_text(row.get(TTRIP_TYPE_COLUMN)),
+        fine_before_sop=_optional_amount(row.get(FINE_BEFORE_SOP_COLUMN)),
+        fine_after_sop=_optional_amount(row.get(FINE_AFTER_SOP_COLUMN)),
+        sop_calculation_failed=_truthy_flag(row.get(SOP_CALCULATION_FAILED_COLUMN)),
     )
 
 
@@ -99,6 +127,11 @@ def claim_dict_to_agent_columns(case: dict[str, Any]) -> dict[str, Any]:
         comments=clean_text(case.get("comments")),
         message=clean_text(case.get("message")),
         vendor_name=clean_text(case.get("vendor_name")) or UNKNOWN_VENDOR_NAME,
+        amount=_optional_amount(case.get("amount")),
+        ttrip_type=clean_text(case.get("ttrip_type")),
+        fine_before_sop=_optional_amount(case.get("fine_before_sop")),
+        fine_after_sop=_optional_amount(case.get("fine_after_sop")),
+        sop_calculation_failed=_truthy_flag(case.get("sop_calculation_failed")),
         source_analysis=dict(case.get("source_analysis") or {}),
     )
     from backend.app.agents.policy import decision_from_dict
@@ -341,6 +374,11 @@ def case_payload_from_graph_state(values: dict[str, Any], *, pending_interrupt: 
         comments=clean_text(values.get("comments")),
         message=clean_text(values.get("message")),
         vendor_name=clean_text(values.get("vendor_name")) or UNKNOWN_VENDOR_NAME,
+        amount=_optional_amount(values.get("amount")),
+        ttrip_type=clean_text(values.get("ttrip_type")),
+        fine_before_sop=_optional_amount(values.get("fine_before_sop")),
+        fine_after_sop=_optional_amount(values.get("fine_after_sop")),
+        sop_calculation_failed=_truthy_flag(values.get("sop_calculation_failed")),
         source_analysis=dict(values.get("source_analysis") or {}),
     )
     from backend.app.agents.models import AgentTraceStep, EvidenceItem
@@ -400,6 +438,11 @@ async def _run_one_case(
         message=case.message,
         vendor_name=case.vendor_name,
         recoverable_amount=case.recoverable_amount,
+        amount=case.amount,
+        ttrip_type=case.ttrip_type,
+        fine_before_sop=case.fine_before_sop,
+        fine_after_sop=case.fine_after_sop,
+        sop_calculation_failed=case.sop_calculation_failed,
         tracking_context=build_tracking_context(tracking_bookings, booking_id),
     )
     config = {"configurable": {"thread_id": thread_id}}
@@ -551,6 +594,11 @@ async def investigate_category_frame_async(
             comments=clean_text(payload.get("comments")),
             message=clean_text(payload.get("message")),
             vendor_name=clean_text(payload.get("vendor_name")) or UNKNOWN_VENDOR_NAME,
+            amount=_optional_amount(payload.get("amount")),
+            ttrip_type=clean_text(payload.get("ttrip_type")),
+            fine_before_sop=_optional_amount(payload.get("fine_before_sop")),
+            fine_after_sop=_optional_amount(payload.get("fine_after_sop")),
+            sop_calculation_failed=_truthy_flag(payload.get("sop_calculation_failed")),
             source_analysis=dict(payload.get("source_analysis") or {}),
         )
         from backend.app.agents.policy import decision_from_dict

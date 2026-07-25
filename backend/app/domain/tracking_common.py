@@ -20,6 +20,7 @@ COMPLAINT_METADATA_COLUMNS = [
     VENDOR_NAME_COLUMN,
 ]
 
+TTRIP_TYPE_COLUMN = "ttrip_type"
 TRACKING_AMOUNT_COLUMNS = [
     "amount",
     "base_amount",
@@ -40,7 +41,12 @@ TRACKING_AMOUNT_COLUMNS = [
     "driver_charge_per_day",
     "total_driver_charge",
 ]
-COMMON_TRACKING_COLUMNS = [*COMPLAINT_METADATA_COLUMNS, *TRACKING_AMOUNT_COLUMNS, COMMENTS_COLUMN]
+COMMON_TRACKING_COLUMNS = [
+    *COMPLAINT_METADATA_COLUMNS,
+    *TRACKING_AMOUNT_COLUMNS,
+    TTRIP_TYPE_COLUMN,
+    COMMENTS_COLUMN,
+]
 
 
 def tracking_cell_value(value: Any) -> Any:
@@ -63,6 +69,7 @@ def build_common_tracking_enrichment(bookings: dict[str, Any], booking_id: str) 
         column: tracking_cell_value(tracking_row.get(column))
         for column in TRACKING_AMOUNT_COLUMNS
     })
+    enrichment[TTRIP_TYPE_COLUMN] = tracking_cell_value(tracking_row.get(TTRIP_TYPE_COLUMN))
     enrichment[COMMENTS_COLUMN] = booking_comments(bookings, booking_id) or tracking_cell_value(
         tracking_row.get("comments")
     )

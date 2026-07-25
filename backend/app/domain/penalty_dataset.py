@@ -18,6 +18,11 @@ DEFAULT_REMARK_SEPARATOR = " / "
 DEFAULT_DUPLICATE_OUTPUT_TEMPLATE = "duplicate_bookings_{date}.xlsx"
 SUB_CATEGORY_PREFIX_PATTERN = r"(?i)^\s*(?:carbd|car)\s*-\s*"
 AUTO_CLAIM_RAISED_REMARK_PATTERN = r"(?i)\s*-\s*auto\s*claim\s*raised\b"
+# Matches "paid amount refund", "refund of the paid amount", "refund of paid amount",
+# including forms embedded in other text (e.g. "VENDOR NO SHOW (PAID AMOUNT REFUND)").
+PAID_AMOUNT_REFUND_REMARK_PATTERN = re.compile(
+    r"\b(?:paid amount refund|refund of(?: the)? paid amount)\b"
+)
 
 FINAL_OUTPUT_COLUMNS = [
     "Booking ID",
@@ -157,6 +162,29 @@ def drop_excluded_subcategories(
         raise KeyError(f"Column {sub_category_column!r} not found in input file.")
 
     keep_mask = ~df[sub_category_column].map(is_excluded_subcategory)
+    return df.loc[keep_mask].copy()
+
+
+def is_excluded_remark(value: object) -> bool:
+    """True when Remarks indicate a paid-amount refund (not a vendor penalty case)."""
+    text = "" if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
+    if not text.strip():
+        return False
+    # Strip the trailing auto-claim suffix so matching focuses on the refund wording.
+    cleaned = re.sub(AUTO_CLAIM_RAISED_REMARK_PATTERN, "", text, flags=re.I).strip()
+    normalized = normalize_category_key(cleaned)
+    return bool(PAID_AMOUNT_REFUND_REMARK_PATTERN.search(normalized))
+
+
+def drop_excluded_remarks(
+    df: pd.DataFrame,
+    remarks_column: str = "Remarks",
+) -> pd.DataFrame:
+    """Drop rows whose Remarks are paid-amount refund (no further penalty processing)."""
+    if remarks_column not in df.columns:
+        raise KeyError(f"Column {remarks_column!r} not found in input file.")
+
+    keep_mask = ~df[remarks_column].map(is_excluded_remark)
     return df.loc[keep_mask].copy()
 
 

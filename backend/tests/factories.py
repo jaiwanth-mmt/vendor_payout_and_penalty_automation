@@ -193,7 +193,7 @@ def write_fulfillment_workbook(path: Path) -> None:
             "Loss Amount (INR)": 125,
             "Recoverable": 125,
             "Recoverable (INR)": 125,
-            "Remarks": "paid amount refund",
+            "Remarks": "Vendor No Show",
             "Approval/Rejected DateTime": "2026-03-19 13:30:00",
         }
     ]
@@ -204,7 +204,7 @@ def write_tracking_json_with_fulfillment(path: Path) -> None:
     payload = {
         "bookings": {
             "B6": {
-                "penalty": {"sub_category": "FULFILLMENT NOT DONE", "remarks": "paid amount refund"},
+                "penalty": {"sub_category": "FULFILLMENT NOT DONE", "remarks": "Vendor No Show"},
                 "tracking_reports_raw": [
                     {
                         "dispatch_id": "dispatch-b6",
@@ -215,6 +215,7 @@ def write_tracking_json_with_fulfillment(path: Path) -> None:
                         "start_time": "2026-03-18 21:45:00",
                         "driver_started": "2026-03-19 03:21:38.764000",
                         "driver_arrived": "2026-03-19 03:21:44.001000",
+                        "ttrip_type": "airport",
                         "amount": 2828,
                         "base_amount": 2413,
                         "amount_paid": 566,
@@ -346,11 +347,12 @@ def mock_llm(prompt: str, _tokens: int, _effort: str) -> str:
             }
         )
     if "Complaint category classification task." in prompt:
+        normalized = prompt.casefold()
         if "extra cash" in prompt or "Sub Category: Extra Money Taken" in prompt:
             return '{"categories": ["Extra Money Taken"]}'
         if "Lower Category Vehicle" in prompt or "electric sedan" in prompt:
             return '{"categories": ["Low Category Vehicle"]}'
-        if "FULFILLMENT NOT DONE" in prompt or "did not arrive" in prompt:
+        if "FULFILLMENT NOT DONE" in prompt or "did not arrive" in prompt or "fulfillment not done" in normalized:
             return '{"categories": ["Vendor No Show"]}'
         if "Driver Behavior" in prompt or "driver behaved rudely" in prompt:
             return '{"categories": ["Bad Driver Behaviour/Skill"]}'

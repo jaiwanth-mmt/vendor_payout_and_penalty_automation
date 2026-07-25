@@ -156,6 +156,13 @@ class PatchEditCaseRequest(BaseModel):
     edit_outcome: EditOutcome | None = None
 
 
+class BulkPatchEditCasesRequest(BaseModel):
+    bucket: AiBucket
+    edit_outcome: EditOutcome
+    booking_id: str | None = None
+    sub_category: str | None = None
+
+
 class EditCaseItem(BaseModel):
     booking_id: str
     comments: str = ""
@@ -164,6 +171,10 @@ class EditCaseItem(BaseModel):
     remarks: str = ""
     sub_category: str = ""
     vendor_name: str = ""
+    amount: float | None = None
+    ttrip_type: str = ""
+    fine_before_sop: float | None = None
+    fine_after_sop: float | None = None
     ai_bucket: AiBucket = "needs_check"
     ai_review_status: str = ""
     edit_outcome: EditOutcome = "needs_ops"
@@ -185,6 +196,15 @@ class EditCasesPageResponse(BaseModel):
     edited_case_count: int = 0
     excluded_case_count: int = 0
     available_sub_categories: list[str] = Field(default_factory=list)
+
+
+class BulkPatchEditCasesResponse(BaseModel):
+    updated_count: int
+    needs_check_count: int = 0
+    auto_approved_count: int = 0
+    unhandled_count: int = 0
+    edited_case_count: int = 0
+    excluded_case_count: int = 0
 
 
 class AgentSummary(BaseModel):

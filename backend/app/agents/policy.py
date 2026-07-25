@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from backend.app.agents.llm import AgentLlmError, apply_guardrail_status
-from backend.app.agents.models import AgentDecision, CaseReviewStatus, ClaimCase, clean_text
+from backend.app.agents.models import AgentDecision, CaseReviewStatus, ClaimCase, clean_number, clean_text
 from backend.app.agents.source_alignment import build_source_alignment, format_categories
+from backend.app.domain.fulfillment_not_done import is_vendor_no_show_category
 
 
 CAB_DELAY_CATEGORY = "Cab Delay"
@@ -41,6 +42,26 @@ AGENT_BY_CATEGORY = {
 HITL_REVIEW_STATUSES = frozenset({"needs_review", "missing_evidence"})
 
 
+def _optional_amount(value: Any) -> float | None:
+    text = clean_text(value)
+    if not text:
+        return None
+    amount = clean_number(value)
+    if amount != amount:
+        return None
+    return round(amount, 2)
+
+
+def vendor_no_show_sop_needs_review(case: ClaimCase) -> bool:
+    """True when Vendor No Show / Fulfillment SOP fine could not be computed."""
+    if not is_vendor_no_show_category(case.sub_category):
+        return False
+    if case.sop_calculation_failed:
+        return True
+    # Enrichment ran (fine_before present) but after-SOP is missing.
+    return case.fine_before_sop is not None and case.fine_after_sop is None
+
+
 def claim_case_from_state(state: dict[str, Any], *, evidence: list[dict[str, Any]] | None = None) -> ClaimCase:
     case = ClaimCase(
         booking_id=clean_text(state.get("booking_id")),
@@ -51,6 +72,11 @@ def claim_case_from_state(state: dict[str, Any], *, evidence: list[dict[str, Any
         comments=clean_text(state.get("comments")),
         message=clean_text(state.get("message")),
         vendor_name=clean_text(state.get("vendor_name")) or "Unknown vendor",
+        amount=_optional_amount(state.get("amount")),
+        ttrip_type=clean_text(state.get("ttrip_type")),
+        fine_before_sop=_optional_amount(state.get("fine_before_sop")),
+        fine_after_sop=_optional_amount(state.get("fine_after_sop")),
+        sop_calculation_failed=bool(state.get("sop_calculation_failed")),
         source_analysis=dict(state.get("source_analysis") or {}),
     )
     if evidence:
@@ -244,6 +270,13 @@ def build_judge_decision(case: ClaimCase) -> tuple[AgentDecision, list[dict[str,
         review_status = "missing_evidence"
         confidence = min(confidence, 0.58)
         reason = clean_text(analysis.get("reason")) or "Judge routed to review because comments and Remarks are unavailable."
+    elif vendor_no_show_sop_needs_review(case):
+        review_status = "needs_review"
+        confidence = min(confidence, 0.75)
+        reason = (
+            "Judge routed to review because Vendor No Show SOP fine could not be computed "
+            "(missing amount or ttrip_type)."
+        )
     elif source_alignment_needs_review(case):
         review_status = "needs_review"
         confidence = min(confidence, 0.75)
@@ -291,6 +324,16 @@ def apply_judge_guardrails(case: ClaimCase, decision: AgentDecision) -> AgentDec
             confidence_cap=0.58,
             reason=clean_text(ensure_source_analysis(case).get("reason"))
             or "Judge guardrail routed to review because comments and Remarks are unavailable.",
+        )
+    if vendor_no_show_sop_needs_review(case):
+        return apply_guardrail_status(
+            decision,
+            review_status="needs_review",
+            confidence_cap=0.75,
+            reason=(
+                "Judge guardrail routed to review because Vendor No Show SOP fine could not be "
+                "computed (missing amount or ttrip_type)."
+            ),
         )
     if source_alignment_needs_review(case):
         return apply_guardrail_status(
@@ -353,7 +396,8 @@ def guardrail_payload(case: ClaimCase) -> dict[str, Any]:
     analysis = ensure_source_analysis(case)
     return {
         "critical_missing": critical_missing(case),
-        "requires_review": source_alignment_needs_review(case),
+        "requires_review": source_alignment_needs_review(case) or vendor_no_show_sop_needs_review(case),
+        "vendor_no_show_sop_needs_review": vendor_no_show_sop_needs_review(case),
         "source_priority": list(SOURCE_HIERARCHY),
         "selected_source": source[0] if source else "",
         "source_alignment": analysis,

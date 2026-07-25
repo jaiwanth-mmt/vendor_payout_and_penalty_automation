@@ -142,6 +142,8 @@ def apply_case_edits_to_processed_frame(frame: pd.DataFrame, cases_by_booking: d
             continue
         if "Recoverable" in output.columns:
             output.at[index, "Recoverable"] = case.get("recoverable_amount", 0)
+        if "fine_after_sop" in output.columns:
+            output.at[index, "fine_after_sop"] = case.get("recoverable_amount", 0)
         if "Sub Category" in output.columns:
             output.at[index, "Sub Category"] = case.get("sub_category", "")
         if "Remarks" in output.columns:

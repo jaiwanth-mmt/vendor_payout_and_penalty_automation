@@ -125,7 +125,7 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert final_output_df.loc[0, "complaint_against"] == COMPLAINT_AGAINST_VALUE
     assert final_output_df.loc[0, "complaint_against_id"] == "dispatch-b1"
     assert final_output_df.loc[0, "title"] == TITLE_VALUE
-    assert final_output_df.loc[0, "message"] == "Cab Delayed > 15 Minutes"
+    assert final_output_df.loc[0, "message"] == "Cab Delay"
     assert final_output_df.loc[0, "fine"] == 150
     assert output_df.columns.tolist() == CAB_DELAY_OUTPUT_COLUMNS
     assert output_df.loc[0, "Booking ID"] == "B1"
@@ -148,7 +148,7 @@ def test_process_uploaded_workbook_generates_category_package(tmp_path: Path) ->
     assert output_df.loc[0, COMMENTS_COLUMN] == (
         "Customer reported that the cab had not arrived and the driver said they needed 20 minutes."
     )
-    assert output_df.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 15 Minutes"
+    assert output_df.loc[0, MESSAGE_COLUMN] == "Cab Delay"
     assert result.category_outputs[0]["name"] == "Cab Delay"
     assert result.category_outputs[0]["row_count"] == 1
     assert "preview_rows" not in result.category_outputs[0]
@@ -287,6 +287,9 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
 
 
 def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path) -> None:
+    if not DEMO_WORKBOOK_PATH.exists() or not DEMO_TRACKING_JSON_PATH.exists():
+        pytest.skip("Demo workbook/tracking fixtures are not present in this workspace")
+
     package_path = tmp_path / "agentic_loss_recovery_package.zip"
 
     result = process_uploaded_workbook(

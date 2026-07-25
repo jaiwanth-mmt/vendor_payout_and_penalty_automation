@@ -187,6 +187,28 @@ def test_create_job_poll_and_download_package(tmp_path: Path, monkeypatch) -> No
         assert edit_wrong_sub.json()["case_count"] == 0
         assert edit_wrong_sub.json()["cases"] == []
 
+        bucket = edit_payload["cases"][0]["ai_bucket"]
+        bulk_response = client.post(
+            f"/api/jobs/{job_id}/edit-cases/bulk",
+            json={
+                "bucket": bucket,
+                "edit_outcome": "include",
+                "sub_category": "Cab Delay",
+            },
+        )
+        assert bulk_response.status_code == 200
+        assert bulk_response.json()["updated_count"] == 1
+        bulk_empty = client.post(
+            f"/api/jobs/{job_id}/edit-cases/bulk",
+            json={
+                "bucket": bucket,
+                "edit_outcome": "exclude",
+                "booking_id": "missing",
+            },
+        )
+        assert bulk_empty.status_code == 200
+        assert bulk_empty.json()["updated_count"] == 0
+
         approve_response = client.post(f"/api/jobs/{job_id}/approve-edits")
         assert approve_response.status_code == 200
         payload = approve_response.json()

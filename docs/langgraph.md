@@ -10,7 +10,7 @@ Leave outside the graph (deterministic prep in `pipeline.py` / `domain/`):
 
 - Excel date filter, CARBD / recoverable filters, dedupe
 - Live MySQL tracking + Redash comments fetch
-- Category column enrichers (`CATEGORY_ASYNC_ENRICHERS`) and complaint `message` classification loops
+- Category column enrichers (`CATEGORY_ASYNC_ENRICHERS`) and deterministic complaint `message` (Remarks → Sub Category; no call-comments LLM)
 
 ## Topology
 
@@ -48,7 +48,7 @@ Evidence agent invokes these tools (InjectedState):
 | `get_tracking_context` | Timing / fare / vehicle support |
 | `get_vendor_context` | Vendor / supplier support |
 
-**Policy:** source text remains primary (`comments` → `Remarks` → Sub Category when mapped). `Details Change` ≡ `Chauffeur/Vehicle Change`. Cab Delay family ↔ Vendor No Show / Fulfillment Not Done prefers Remarks → Sub Category. Tracking/vendor/fare are supporting context and must not alone approve a penalty. Judge guardrails in `policy.py` still force review on unmapped Sub Category-only rows and invalid-penalty language — not booking-ID mismatch.
+**Policy:** category alignment primary is `Remarks` → Sub Category when mapped. Call comments remain available via `get_comments` for display/tools only and do not drive `message` or category primary. `message` is built deterministically from Remarks → Sub Category (`Fulfillment Not Done` → `Vendor No Show`). `Details Change` ≡ `Chauffeur/Vehicle Change`. Tracking/vendor/fare are supporting context and must not alone approve a penalty. Judge guardrails in `policy.py` still force review on unmapped Sub Category-only rows, invalid-penalty language, and Vendor No Show rows where SOP fine could not be computed (missing `amount` / `ttrip_type`) — not booking-ID mismatch. Edit-stage routing in `edit_cases.resolve_edit_bucket` additionally sends missing-Remarks mapped cases to Needs check and blank/`Uncategorized` Sub Category cases to New/unique, with explicit user-facing reasons. The Review UI no longer surfaces per-case LLM rationale or investigation graphs.
 
 ## Streaming + UI
 

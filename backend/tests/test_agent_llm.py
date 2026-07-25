@@ -67,7 +67,7 @@ def source_aligned_llm(prompt: str, _tokens: int, _effort: str) -> str:
 def categories_for_prompt(prompt: str) -> list[str]:
     normalized = prompt.casefold()
     categories: list[str] = []
-    if "paid amount refund" in normalized:
+    if "ops note unrelated" in normalized:
         return []
     if "cab delayed > 1 hour" in prompt or "more than 1 hour" in normalized:
         categories.append("Cab Delayed > 1 Hour")
@@ -338,7 +338,7 @@ def test_judge_promotes_low_confidence_selected_source_to_auto_ready() -> None:
     assert case.judge_decision.recommended_recovery_amount == 100
 
 
-def test_comments_mismatch_routes_to_review() -> None:
+def test_comments_mismatch_does_not_override_remarks_alignment() -> None:
     df = pd.DataFrame(
         [
             {
@@ -356,10 +356,11 @@ def test_comments_mismatch_routes_to_review() -> None:
         investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
     )
 
-    assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
-    assert cases[0]["review_status"] == "needs_review"
-    assert cases[0]["source_analysis"]["source_categories"] == ["Extra Money Taken"]
-    assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Cab Delay"]
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delay"]
+    assert cases[0]["source_analysis"]["comments_categories"] == []
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
 
 
@@ -405,7 +406,9 @@ def test_comments_with_expected_and_extra_categories_are_auto_ready() -> None:
     )
 
     assert cases[0]["review_status"] == "auto_ready"
-    assert cases[0]["final_decision"]["complaint_categories"] == ["Cab Delay", "Extra Money Taken"]
+    # Alignment follows Remarks; call-comment extras in the pre-seeded message are not primary.
+    assert cases[0]["final_decision"]["complaint_categories"] == ["Extra Money Taken"]
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
     assert output.loc[0, MESSAGE_COLUMN] == "Cab Delay + Extra Money Taken"
 
 
@@ -429,7 +432,9 @@ def test_comment_booking_id_mismatch_does_not_block_auto_ready() -> None:
 
     assert cases[0]["review_status"] == "auto_ready"
     assert cases[0]["source_analysis"]["status"] == "aligned"
-    assert cases[0]["source_analysis"]["mentioned_booking_ids"] == ["NC9999999999"]
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
+    # Booking IDs in call comments are ignored for alignment routing.
+    assert cases[0]["source_analysis"]["mentioned_booking_ids"] == []
 
 
 def test_booking_words_do_not_create_false_id_mismatch() -> None:
@@ -478,9 +483,11 @@ def test_cab_delay_duration_categories_align_with_generic_cab_delay() -> None:
     )
 
     assert cases[0]["review_status"] == "auto_ready"
-    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delayed > 1 Hour"]
+    assert cases[0]["source_analysis"]["primary_source"] == "remarks"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delay"]
     assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
     assert cases[0]["source_analysis"]["status"] == "aligned"
+    assert cases[0]["source_analysis"]["comments_categories"] == []
     assert output.loc[0, MESSAGE_COLUMN] == "Cab Delayed > 1 Hour"
 
 
@@ -549,9 +556,10 @@ def test_empty_remarks_uses_subcategory_for_alignment() -> None:
         investigate_category_frame_async(df, tracking_bookings={}, llm_generator=source_aligned_llm, llm_concurrency=1)
     )
 
-    assert cases[0]["review_status"] == "needs_review"
-    assert cases[0]["source_analysis"]["comparison_source"] == "sub_category"
-    assert cases[0]["source_analysis"]["row_categories"] == ["Cab Delay"]
+    assert cases[0]["review_status"] == "auto_ready"
+    assert cases[0]["source_analysis"]["primary_source"] == "sub_category"
+    assert cases[0]["source_analysis"]["source_categories"] == ["Cab Delay"]
+    assert cases[0]["source_analysis"]["comments_categories"] == []
     assert output.loc[0, MESSAGE_COLUMN] == "Extra Money Taken"
 
 
@@ -561,7 +569,7 @@ def test_unmappable_remarks_can_still_auto_ready_when_subcategory_matches() -> N
             {
                 "Booking ID": "B11Z",
                 "Sub Category": "Vendor No Show",
-                "Remarks": "paid amount refund",
+                "Remarks": "ops note unrelated to category",
                 "Recoverable": 80,
                 "comments": "Customer said the vendor did not arrive.",
                 MESSAGE_COLUMN: "Vendor No Show",
@@ -1000,5 +1008,5 @@ def test_llm_message_is_preserved_after_agent_decision() -> None:
     )
 
     assert output.loc[0, MESSAGE_COLUMN] == "Cab Delay"
-    assert cases[0]["review_status"] == "needs_review"
+    assert cases[0]["review_status"] == "auto_ready"
     assert cases[0]["final_decision"]["decision_source"] == "llm"

@@ -170,6 +170,11 @@ class ClaimCase:
     comments: str = ""
     message: str = ""
     vendor_name: str = "Unknown vendor"
+    amount: float | None = None
+    ttrip_type: str = ""
+    fine_before_sop: float | None = None
+    fine_after_sop: float | None = None
+    sop_calculation_failed: bool = False
     evidence: list[EvidenceItem] = field(default_factory=list)
     trace: list[AgentTraceStep] = field(default_factory=list)
     source_analysis: dict[str, Any] = field(default_factory=dict)
@@ -199,6 +204,11 @@ class ClaimCase:
             "recoverable_amount": round(self.recoverable_amount, 2),
             "row_index": self.row_index,
             "message": clean_text(self.message or self.source_analysis.get("message")),
+            "amount": None if self.amount is None else round(self.amount, 2),
+            "ttrip_type": clean_text(self.ttrip_type),
+            "fine_before_sop": None if self.fine_before_sop is None else round(self.fine_before_sop, 2),
+            "fine_after_sop": None if self.fine_after_sop is None else round(self.fine_after_sop, 2),
+            "sop_calculation_failed": bool(self.sop_calculation_failed),
             "source_analysis": json_safe(self.source_analysis),
             "review_status": self.review_status,
             "evidence": [item.to_dict() for item in self.evidence],

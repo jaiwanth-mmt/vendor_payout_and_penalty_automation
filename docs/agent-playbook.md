@@ -9,6 +9,9 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - **Add an evidence tool:** define `@tool` in `tools.py`, add to `INVESTIGATION_TOOLS`, and ensure evidence_agent invokes it. Update UI tool timeline expectations if needed.
 - **Change HITL routing (test-only interrupts):** edit `HITL_REVIEW_STATUSES` / `human_review_node` in `policy.py` + `nodes/investigation.py`. Production uses the edit stage instead.
 - **Change edit stage:** `backend/app/services/edit_cases.py`, `apply_edits_and_package` in `pipeline.py`, routes in `main.py`, `JobEditPage` + types.
+- **Edit bucket routing:** `resolve_edit_bucket` in `edit_cases.py` — missing Remarks → Needs check; blank/`Uncategorized` Sub Category → New/unique; unmapped Sub Category → New/unique. Bulk outcomes: `POST /api/jobs/{id}/edit-cases/bulk`.
+- **Vendor No Show SOP fine:** `backend/app/domain/fulfillment_not_done.py` (`compute_vendor_no_show_sop_fine`); airport/local → `min(0.5 * amount, 500)`, other trip types → `min(0.25 * amount, 2000)`. Edit UI shows Fine before SOP (read-only) + Fine after SOP (editable recoverable). Final Excel `fine` = after-SOP value only.
+- **Review page:** keep aggregate recovery analysis only in `AgentCockpit.tsx` (no investigation dossier / graphs).
 - **Change prepared workbook shaping:** edit `backend/app/domain/penalty_dataset.py` (including `filter_by_input_date_range`). Edit `subcategories.py` only for naming/slugging/split.
 - **Change package contents:** edit `backend/app/services/package_builder.py`.
 - **Change API progress/response fields:** update `backend/app/models.py`, `job_store.py`, and `frontend/src/types/jobs.ts` together.
@@ -20,12 +23,14 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - JobResponse includes `start_date`, `end_date`, `process_all`.
 - Job statuses: `queued` | `running` | `awaiting_edit` | `awaiting_review` (legacy) | `succeeded` | `failed`.
 - LangGraph visibility: `investigation_summary` (primary), `agent_progress`, `graph_topology`; `graph_events` for collapsed technical detail only.
-- Edit endpoints: `GET /api/jobs/{id}/edit-cases` (optional `booking_id`, `sub_category`, `bucket`, `page`), `PATCH /api/jobs/{id}/edit-cases/{booking_id}`, `POST /api/jobs/{id}/approve-edits`.
+- Edit endpoints: `GET /api/jobs/{id}/edit-cases` (optional `booking_id`, `sub_category`, `bucket`, `page`), `PATCH /api/jobs/{id}/edit-cases/{booking_id}`, `POST /api/jobs/{id}/edit-cases/bulk` (`bucket`, `edit_outcome`, optional filters), `POST /api/jobs/{id}/approve-edits`.
+- Review page is aggregate-only (KPIs + vendor/category analysis + recommended actions).
 - Legacy HITL (tests): `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`.
 - Also: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/categories/download`.
-- Every processed workbook includes shared tracking fields, `message`, and agent metadata columns.
+- Every processed workbook includes shared tracking fields (`amount`, `ttrip_type`, …), `message`, and agent metadata columns.
+- Fulfillment Not Done / Vendor No Show also adds `fine_before_sop` / `fine_after_sop` (not in final Excel).
 - Cab Delay adds timing + comments when available.
-- Evidence tools may include tracking/vendor context; source-text alignment remains primary for auto-ready (`comments` → `Remarks` → mapped Sub Category).
+- Evidence tools may include tracking/vendor context and call comments for display; source-text alignment primary for auto-ready is `Remarks` → mapped Sub Category (`message` is deterministic from the same priority).
 - ZIP: `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, `agent_summary.json`, `category_files/prepared/*.xlsx`, `category_files/processed/*.xlsx`.
 - UI routes: `/` → `/jobs/:jobId` (progress) → `/jobs/:jobId/edit` → `/jobs/:jobId/review` (analysis) → `/jobs/:jobId/outputs`. Job session state lives in `JobProvider`.
 - `data/demo/tracking_reports_by_booking.json` is reference-only; production uses live MySQL/Redash.

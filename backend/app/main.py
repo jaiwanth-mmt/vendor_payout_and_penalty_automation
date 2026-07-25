@@ -25,6 +25,8 @@ from backend.app.agents.runner import (
 from backend.app.integrations.tracking import live_tracking_repository_from_env
 from backend.app.models import (
     AgentCasesPageResponse,
+    BulkPatchEditCasesRequest,
+    BulkPatchEditCasesResponse,
     CategoryPreviewResponse,
     CreateJobResponse,
     EditCaseItem,
@@ -38,6 +40,7 @@ from backend.app.models import (
     ReviewQueuePageResponse,
 )
 from backend.app.services.edit_cases import (
+    bulk_patch_edit_outcomes,
     distinct_edit_sub_categories,
     edit_case_api_view,
     edit_metrics,
@@ -388,6 +391,8 @@ def list_edit_cases(
         sub_category=sub_category,
     )
     counts = edit_metrics(cases)
+    # Dropdown options are scoped to the section (bucket), not the active booking/sub filters.
+    option_cases = filter_edit_cases(cases, bucket=bucket) if bucket else cases
     page_cases, safe_page, total_pages = paginate_items(filtered, page=page, page_size=AGENT_PAGE_SIZE)
     return EditCasesPageResponse(
         cases=[EditCaseItem(**edit_case_api_view(case)) for case in page_cases],
@@ -400,7 +405,7 @@ def list_edit_cases(
         unhandled_count=counts["unhandled_count"],
         edited_case_count=counts["edited_case_count"],
         excluded_case_count=counts["excluded_case_count"],
-        available_sub_categories=distinct_edit_sub_categories(cases),
+        available_sub_categories=distinct_edit_sub_categories(option_cases),
     )
 
 
@@ -443,6 +448,49 @@ def patch_job_edit_case(job_id: str, booking_id: str, body: PatchEditCaseRequest
 
         job["updated_at"] = utc_now()
     return EditCaseItem(**edit_case_api_view(patched))
+
+
+@app.post("/api/jobs/{job_id}/edit-cases/bulk", response_model=BulkPatchEditCasesResponse)
+def bulk_patch_job_edit_cases(job_id: str, body: BulkPatchEditCasesRequest) -> BulkPatchEditCasesResponse:
+    try:
+        snapshot = job_store.snapshot(job_id)
+        cases = job_store.get_agent_cases(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status not in {"awaiting_edit", "succeeded"}:
+        raise HTTPException(status_code=409, detail="Job is not editable")
+
+    try:
+        updated_cases, updated_count = bulk_patch_edit_outcomes(
+            cases,
+            bucket=body.bucket,
+            edit_outcome=body.edit_outcome,
+            booking_id=body.booking_id,
+            sub_category=body.sub_category,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    job_store.update_agent_cases(job_id, updated_cases)
+    counts = edit_metrics(updated_cases)
+    with job_store._lock:
+        job = job_store._jobs[job_id]
+        job["metrics"] = {
+            **dict(job.get("metrics") or {}),
+            **counts,
+        }
+        from backend.app.services.job_store import utc_now
+
+        job["updated_at"] = utc_now()
+    return BulkPatchEditCasesResponse(
+        updated_count=updated_count,
+        needs_check_count=counts["needs_check_count"],
+        auto_approved_count=counts["auto_approved_count"],
+        unhandled_count=counts["unhandled_count"],
+        edited_case_count=counts["edited_case_count"],
+        excluded_case_count=counts["excluded_case_count"],
+    )
 
 
 @app.post("/api/jobs/{job_id}/approve-edits", response_model=JobResponse)

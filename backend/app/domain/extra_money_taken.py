@@ -11,7 +11,6 @@ from backend.app.domain.tracking_common import tracking_cell_value
 
 EXTRA_MONEY_TAKEN_TRACKING_FIELDS = [
     "type",
-    "ttrip_type",
 ]
 EXTRA_MONEY_TAKEN_ENRICHMENT_COLUMNS = [*EXTRA_MONEY_TAKEN_TRACKING_FIELDS, COMMENTS_COLUMN]
 
