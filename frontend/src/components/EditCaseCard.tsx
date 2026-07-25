@@ -16,7 +16,23 @@ type EditCaseCardProps = {
   onSave: (bookingId: string, patch: PatchEditCaseRequest) => Promise<void>;
 };
 
+function isVendorNoShowCase(caseItem: EditCaseItem): boolean {
+  const sub = (caseItem.sub_category || "").toLowerCase();
+  return (
+    sub.includes("fulfillment not done") ||
+    sub.includes("vendor no show") ||
+    caseItem.fine_before_sop != null ||
+    caseItem.fine_after_sop != null
+  );
+}
+
+function formatReadonlyAmount(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return String(value);
+}
+
 function EditCaseCard({ caseItem, disabled = false, onSave }: EditCaseCardProps) {
+  const vendorNoShow = isVendorNoShowCase(caseItem);
   const [recoverable, setRecoverable] = useState(String(caseItem.recoverable_amount ?? 0));
   const [message, setMessage] = useState(caseItem.message ?? "");
   const [remarks, setRemarks] = useState(caseItem.remarks ?? "");
@@ -58,7 +74,7 @@ function EditCaseCard({ caseItem, disabled = false, onSave }: EditCaseCardProps)
   async function saveRecoverable() {
     const amount = Number(recoverable);
     if (!Number.isFinite(amount) || amount < 0) {
-      setLocalError("Fine amount must be a number 0 or higher");
+      setLocalError(vendorNoShow ? "Fine after SOP must be a number 0 or higher" : "Fine amount must be a number 0 or higher");
       return;
     }
     if (amount === caseItem.recoverable_amount) return;
@@ -92,7 +108,11 @@ function EditCaseCard({ caseItem, disabled = false, onSave }: EditCaseCardProps)
   }
 
   return (
-    <article className="editCaseCard" data-edited={caseItem.was_edited ? "true" : "false"}>
+    <article
+      className="editCaseCard"
+      data-edited={caseItem.was_edited ? "true" : "false"}
+      data-vendor-no-show={vendorNoShow ? "true" : "false"}
+    >
       <header className="editCaseHeader">
         <div className="editCaseIdentity">
           <span className={`bookingIdChip${caseItem.was_edited ? " bookingIdChipEdited" : ""}`}>
@@ -120,18 +140,47 @@ function EditCaseCard({ caseItem, disabled = false, onSave }: EditCaseCardProps)
       )}
 
       <div className="editFieldGrid">
-        <label className="editField editFieldFine">
-          <span>Fine (₹)</span>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            value={recoverable}
-            disabled={disabled || saving}
-            onChange={(event) => setRecoverable(event.target.value)}
-            onBlur={() => void saveRecoverable()}
-          />
+        <label className="editField editFieldAmount">
+          <span>Amount (₹)</span>
+          <input type="text" value={formatReadonlyAmount(caseItem.amount)} disabled readOnly />
         </label>
+        <label className="editField editFieldTripType">
+          <span>Trip type</span>
+          <input type="text" value={caseItem.ttrip_type?.trim() || "—"} disabled readOnly />
+        </label>
+        {vendorNoShow ? (
+          <>
+            <label className="editField editFieldBeforeSop">
+              <span>Fine before SOP (₹)</span>
+              <input type="text" value={formatReadonlyAmount(caseItem.fine_before_sop)} disabled readOnly />
+            </label>
+            <label className="editField editFieldFine">
+              <span>Fine after SOP (₹)</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={recoverable}
+                disabled={disabled || saving}
+                onChange={(event) => setRecoverable(event.target.value)}
+                onBlur={() => void saveRecoverable()}
+              />
+            </label>
+          </>
+        ) : (
+          <label className="editField editFieldFine">
+            <span>Fine (₹)</span>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={recoverable}
+              disabled={disabled || saving}
+              onChange={(event) => setRecoverable(event.target.value)}
+              onBlur={() => void saveRecoverable()}
+            />
+          </label>
+        )}
         <label className="editField editFieldSub">
           <span>Sub category</span>
           <input

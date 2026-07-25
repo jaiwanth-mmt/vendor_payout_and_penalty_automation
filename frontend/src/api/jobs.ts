@@ -2,6 +2,8 @@ import type {
   AgentCase,
   AgentCasesResponse,
   AiBucket,
+  BulkPatchEditCasesRequest,
+  BulkPatchEditCasesResponse,
   CategoryPreviewResponse,
   CreateJobResponse,
   EditCaseItem,
@@ -145,6 +147,22 @@ export async function patchEditCase(
     throw new Error(payload.detail ?? "Unable to save edit");
   }
   return (await response.json()) as EditCaseItem;
+}
+
+export async function bulkPatchEditCases(
+  jobId: string,
+  body: BulkPatchEditCasesRequest
+): Promise<BulkPatchEditCasesResponse> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/edit-cases/bulk`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to apply bulk edit");
+  }
+  return (await response.json()) as BulkPatchEditCasesResponse;
 }
 
 export async function approveEdits(jobId: string): Promise<JobResponse> {
