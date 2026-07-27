@@ -332,6 +332,11 @@ h2 {
   gap: 18px;
 }
 
+.outputsPage {
+  width: 100%;
+  min-width: 0;
+}
+
 .progressPage .processSurface {
   max-width: none;
   margin: 0;
@@ -339,7 +344,9 @@ h2 {
 
 .outputsPage .finalOutputSurface,
 .outputsPage .previewSurface {
-  max-width: none;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
 }
 
@@ -3307,6 +3314,80 @@ button.editBucketToggle:focus-visible {
   color: var(--color-muted);
   font-size: 0.86rem;
   margin-top: 2px;
+}
+
+.vendorMailerSurface {
+  display: grid;
+  gap: 14px;
+}
+
+.vendorMailerSurface .surfaceHeader {
+  align-items: flex-start;
+}
+
+.vendorMailAssignments {
+  margin-bottom: 4px;
+}
+
+.mailTemplateBody {
+  display: grid;
+  gap: 10px;
+}
+
+.mailTemplateMeta {
+  display: grid;
+  gap: 4px;
+  color: var(--color-ink);
+  font-size: 0.92rem;
+}
+
+.mailTemplateMeta strong {
+  display: inline-block;
+  min-width: 72px;
+  margin-right: 8px;
+  color: var(--color-muted);
+}
+
+.mailKeyValueTable th {
+  width: 180px;
+  text-align: left;
+  font-weight: 800;
+  background: #f8fafc;
+}
+
+.mailRawPreview {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--color-surface);
+}
+
+.mailRawPreview summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.mailRawPreview pre {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.84rem;
+  color: var(--color-muted);
+}
+
+.vendorMailSendBar strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mailSendError {
+  margin-top: 4px;
+  max-width: 360px;
+  color: #b42318;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .caseSelector button[data-edited="true"],

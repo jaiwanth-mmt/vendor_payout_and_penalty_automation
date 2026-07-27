@@ -16,6 +16,7 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - **Change package contents:** edit `backend/app/services/package_builder.py`.
 - **Change API progress/response fields:** update `backend/app/models.py`, `job_store.py`, and `frontend/src/types/jobs.ts` together.
 - **Change live tracking:** edit `backend/app/integrations/tracking/` and/or `tracking_reports.py` / `redash_call_comments.py`. Pipeline accepts any `TrackingRepository`.
+- **Vendor penalty mailer:** edit `integrations/smtp.py`, `domain/mail_templates.py`, `domain/mail_assignment.py`, `agents/mailer/`, `services/mailer.py`, routes in `main.py`, and `VendorMailerPanel` on Outputs. Keep recipient list in `MAILER_RECIPIENTS`.
 
 ## Output Contracts
 
@@ -27,6 +28,7 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 - Review page is aggregate-only (KPIs + vendor/category analysis + recommended actions).
 - Legacy HITL (tests): `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`.
 - Also: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/categories/download`.
+- Vendor mailer (after `succeeded`): `GET /api/jobs/{id}/mailer`, `POST /api/jobs/{id}/mailer/preview`, `POST /api/jobs/{id}/mailer/send` with `{ preview_token }`. Freeze artifact: `mailer_dispatch.json`.
 - Every processed workbook includes shared tracking fields (`amount`, `ttrip_type`, …), `message`, and agent metadata columns.
 - Fulfillment Not Done / Vendor No Show also adds `fine_before_sop` / `fine_after_sop` (not in final Excel).
 - Cab Delay adds timing + comments when available.
@@ -39,12 +41,15 @@ Keep public API routes, frontend response types, final XLSX columns, and ZIP com
 
 - `test_pipeline.py`: orchestration + approve-edits packaging; inject `InMemoryTrackingRepository`.
 - `test_edit_cases.py`: edit snapshot/patch/outcomes + exclude packaging.
-- `test_api.py`: HTTP job lifecycle; monkeypatch `live_tracking_repository_from_env`.
+- `test_api.py`: HTTP job lifecycle; monkeypatch `live_tracking_repository_from_env`; mailer preview/send gates.
 - `test_category_processors.py`: registry enrichers + LLM concurrency.
 - `test_package_builder.py`: manifest/ZIP schemas (`start_date`/`end_date`/`process_all`).
 - `test_penalty_dataset.py`: approval datetime parsing (day-first + time strip) and range filter.
 - `test_agent_llm.py`: prompts/decisions/portfolio (compat wrappers over LangGraph nodes).
 - `test_langgraph_graph.py`: graph compile, tools, HITL interrupt/resume (`enable_hitl=True`).
+- `test_smtp_client.py`: SMTP config/recipients + in-memory transport.
+- `test_mail_templates.py`: deterministic mail body + assignment reuse rules.
+- `test_mailer_graph.py`: mailer graph preview freeze, one-shot send, partial failure.
 - `factories.py`: shared workbook/tracking fixtures.
 
 ## Verification

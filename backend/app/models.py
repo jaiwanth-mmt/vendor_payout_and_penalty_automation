@@ -137,6 +137,7 @@ class PendingInterrupt(BaseModel):
 class GraphTopologyResponse(BaseModel):
     case: dict[str, Any] = Field(default_factory=dict)
     portfolio: dict[str, Any] = Field(default_factory=dict)
+    mailer: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResumeCaseRequest(BaseModel):
@@ -275,3 +276,57 @@ class JobResponse(BaseModel):
 class CreateJobResponse(BaseModel):
     job_id: str
     status: JobStatus
+
+
+MailerStatus = Literal["idle", "preview_ready", "sending", "sent", "partial", "failed"]
+
+
+class MailerAssignment(BaseModel):
+    recipient: str
+    booking_id: str
+    subject: str = ""
+
+
+class MailerDraftField(BaseModel):
+    key: str
+    value: str = ""
+
+
+class MailerDraft(BaseModel):
+    recipient: str
+    booking_id: str
+    subject: str
+    text_body: str = ""
+    html_body: str = ""
+    fields: list[MailerDraftField] = Field(default_factory=list)
+    title: str = ""
+    message: str = ""
+    fine: str = ""
+    call_transcript: str = ""
+
+
+class MailerSendResult(BaseModel):
+    recipient: str
+    booking_id: str
+    status: Literal["sent", "failed"]
+    message_id: str | None = None
+    smtp_response: str = ""
+    error: str | None = None
+    sent_at: str | None = None
+
+
+class MailerDispatchResponse(BaseModel):
+    status: MailerStatus = "idle"
+    preview_token: str | None = None
+    final_output_checksum: str | None = None
+    recipients: list[str] = Field(default_factory=list)
+    assignments: list[MailerAssignment] = Field(default_factory=list)
+    drafts: list[MailerDraft] = Field(default_factory=list)
+    results: list[MailerSendResult] = Field(default_factory=list)
+    sent_at: str | None = None
+    error: str | None = None
+    can_send: bool = False
+
+
+class SendVendorMailRequest(BaseModel):
+    preview_token: str

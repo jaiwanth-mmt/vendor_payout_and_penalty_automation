@@ -17,11 +17,15 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 - `backend/app/core/tracking_utils.py`: shared tracking dict access + time formatting (do **not** put these in Cab Delay).
 - `backend/app/core/paths.py` / `env.py`: repo paths and `.env` loading (`LANGGRAPH_RUNTIME_ROOT`).
 - `backend/app/integrations/llm_client.py`: Azure OpenAI sync/async client for category enrichers and investigation.
+- `backend/app/integrations/smtp.py`: STARTTLS SMTP transport + `MAILER_RECIPIENTS` config for vendor penalty mail.
 - `backend/app/integrations/tracking/`: `TrackingRepository` (live MySQL + suppliers + Redash; in-memory for tests).
 - `backend/app/integrations/tracking_reports.py`: MySQL fetch/prune/vendor join helpers (library only).
 - `backend/app/integrations/redash_call_comments.py`: Redash comment fetch (library only).
 - `backend/app/agents/`: **LangGraph investigation** — `graphs.py`, `runner.py`, `tools.py`, `nodes/`, `policy.py`, `state.py`, `langchain_model.py`, plus source alignment / portfolio helpers.
-- `frontend/src/`: React multi-page UI — `/` upload, `/jobs/:jobId` progress, `/jobs/:jobId/edit`, `/jobs/:jobId/review` (analysis only), `/jobs/:jobId/outputs`. `JobProvider`/`useJobSession` own poll+SSE across job routes.
+- `backend/app/agents/mailer/`: deterministic LangGraph mailer (assign → compose → validate → send → finalize).
+- `backend/app/services/mailer.py`: preview/send orchestration + `mailer_dispatch.json` freeze/idempotency.
+- `backend/app/domain/mail_templates.py` / `mail_assignment.py`: penalty email bodies + recipient↔booking assignment.
+- `frontend/src/`: React multi-page UI — `/` upload, `/jobs/:jobId` progress, `/jobs/:jobId/edit`, `/jobs/:jobId/review` (analysis only), `/jobs/:jobId/outputs` (downloads + vendor mailer). `JobProvider`/`useJobSession` own poll+SSE across job routes.
 - `data/demo/`: reference workbook + reference tracking JSON shape (**API does not read tracking JSON**).
 - `docs/langgraph.md`: LangGraph topology, tools, edit gate, streaming contracts for coding agents.
 - `docs/agent-playbook.md`: common AI-agent edit recipes.
@@ -46,17 +50,20 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 7. Job status → **`awaiting_edit`**. Edit buckets: **Needs check** / **New–unique categories** / **AI auto-approved**. Deterministic bucket rules: missing Remarks + mapped Sub Category → Needs check (message from Sub Category; Fulfillment Not Done message stays Vendor No Show); missing Sub Category (blank/`Uncategorized`) → New/unique with explicit reason; unmapped Sub Category → New/unique. Humans edit recoverable / message / remarks / sub_category and set Include / Needs ops / Exclude (booking ID + call comments + amount + ttrip_type read-only; Vendor No Show also shows Fine before SOP read-only and Fine after SOP editable via recoverable). Each section has filter-aware Bulk include / Bulk exclude / Bulk needs ops. Unique categories still get tracking + investigation and appear in category previews/ZIP when included. Final `fine` stays the after-SOP recoverable (human-edited if changed); SOP/amount columns are not added to `final_output.xlsx`.
 8. `POST /api/jobs/{id}/approve-edits` → rewrite processed XLSX → portfolio → ZIP → `succeeded`.
 9. Review UI shows aggregate analysis only (KPIs, vendor/category totals, recommended actions); Outputs for downloads.
+10. On Outputs, **Send mail to vendor** runs the deterministic LangGraph mailer: freezes one draft per `MAILER_RECIPIENTS` entry (random unique booking when possible; reuse if fewer rows), previews templates, then sends once via SMTP.
 
 ## Live Tracking Config (`.env`)
 Required for API jobs: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_TABLE_NAME` (default `tracking_reports_raw`).
 Optional: `MYSQL_SUPPLIERS_TABLE_NAME` (default `incabs_suppliers`), `REDASH_*`, `AZURE_OPENAI_*`, `CATEGORY_PROCESSING_CONCURRENCY`, `LLM_CONCURRENCY`.
+Vendor mailer: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`, `SMTP_TIMEOUT_SECONDS`, `MAILER_RECIPIENTS` (comma-separated editable recipient list).
 
 ## Safe Edit Guidance
 - Keep ZIP layout stable unless the user asks to change contracts.
 - **LangGraph changes:** edit `backend/app/agents/graphs.py`, `nodes/`, `tools.py`, `policy.py`, `runner.py`. Read `docs/langgraph.md` first.
 - **Edit-stage changes:** `backend/app/services/edit_cases.py`, approve path in `pipeline.apply_edits_and_package`, routes in `main.py`, UI under `frontend/src/pages/JobEditPage.tsx`.
 - **Add/remove a subcategory enricher:** register one entry in `CATEGORY_ASYNC_ENRICHERS` + output columns in `CATEGORY_PROCESSORS`; put helpers in a focused `domain/` module. Do **not** move enrichers into LangGraph.
-- **Do not** put MySQL/Redash/Azure HTTP in React or route handlers — use `integrations/`.
+- **Do not** put MySQL/Redash/Azure/SMTP HTTP in React or route handlers — use `integrations/`.
+- **Vendor mailer:** SMTP lives in `integrations/smtp.py`; assignment/templates in `domain/`; LangGraph orchestration in `agents/mailer/`; freeze/send in `services/mailer.py`. For `smtpmail.mmt.com` set `SMTP_TLS_VERIFY=false` (internal CA; same as the nodemailer sample). Keep `SMTP_PASSWORD` only in gitignored `.env`.
 - **Evidence policy:** tools may return tracking/vendor/fare context and call comments for display; **source-text alignment primary is Remarks → Sub Category when mapped** (comments are not a category signal). `message` is deterministic from the same Remarks → Sub Category priority (`Fulfillment Not Done` → `Vendor No Show`). `Details Change` ≡ `Chauffeur/Vehicle Change`. Judge guardrails still force review labels on unmapped Sub Category-only rows, invalid-penalty language, and Vendor No Show rows missing SOP inputs (`amount` / `ttrip_type`) — **not** on booking-ID mismatch.
 - Tests inject `InMemoryTrackingRepository`; never require live DB for `pytest`. Graph HITL unit tests may still use `enable_hitl=True`; production jobs use `enable_hitl=False` + edit stage.
 - After structural code moves: `graphify update .`

@@ -126,6 +126,8 @@ def portfolio_graph_mermaid(graph=None) -> str:
 
 
 def graph_topology_payload() -> dict[str, Any]:
+    from backend.app.agents.mailer.graphs import mailer_topology_payload
+
     case_graph = build_case_graph(enable_hitl=True)
     portfolio_graph = build_portfolio_graph()
     return {
@@ -137,6 +139,7 @@ def graph_topology_payload() -> dict[str, Any]:
             "nodes": PORTFOLIO_NODE_NAMES,
             "mermaid": sanitize_mermaid(portfolio_graph.get_graph().draw_mermaid()),
         },
+        "mailer": mailer_topology_payload(),
     }
 
 

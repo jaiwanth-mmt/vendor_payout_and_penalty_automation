@@ -26,9 +26,21 @@ Job portfolio graph (`thread_id = "{job_id}:portfolio"`):
 portfolio_summary → vendor_penalty_analysis
 ```
 
+Vendor penalty mailer graph (`thread_id = "{job_id}:mailer"`), triggered manually from Outputs after `succeeded`:
+
+```text
+assign → compose → validate → send → finalize
+```
+
+- Deterministic templates only (no LLM rewrite of title/message/fine/transcript/booking).
+- SMTP lives in [`backend/app/integrations/smtp.py`](../backend/app/integrations/smtp.py); freeze/idempotency in [`backend/app/services/mailer.py`](../backend/app/services/mailer.py).
+- Recipient list is editable via `MAILER_RECIPIENTS` in `.env`.
+- Artifact: `{job_dir}/mailer_dispatch.json` stores frozen drafts + send results.
+
 Source of truth:
 
 - [`backend/app/agents/graphs.py`](../backend/app/agents/graphs.py) — `build_case_graph`, `build_portfolio_graph`
+- [`backend/app/agents/mailer/`](../backend/app/agents/mailer/) — mailer state/nodes/graph/runner
 - [`backend/app/agents/nodes/investigation.py`](../backend/app/agents/nodes/investigation.py) — node bodies
 - [`backend/app/agents/runner.py`](../backend/app/agents/runner.py) — fan-out, streaming, resume
 - [`backend/app/agents/tools.py`](../backend/app/agents/tools.py) — `@tool` evidence gatherers
@@ -94,10 +106,11 @@ LangChain chat model factory: [`backend/app/agents/langchain_model.py`](../backe
 
 ## Do not
 
-- Put MySQL / Redash / Excel ETL inside LangGraph nodes
+- Put MySQL / Redash / Excel ETL / SMTP sockets inside LangGraph nodes (call integrations from mailer send via injected transport)
 - Use deprecated `langgraph.prebuilt.create_react_agent` (use fixed `StateGraph` + tools here)
 - Use `langgraph-supervisor` for this pipeline (subcategory is already known)
 - Reintroduce “tracking forbidden in agent decisions” — that rule is obsolete; follow the policy section above
+- Disable TLS certificate verification for SMTP
 
 ## Verification
 
