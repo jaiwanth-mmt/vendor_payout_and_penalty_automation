@@ -11,10 +11,12 @@ import type {
   FinalOutputPreviewResponse,
   GraphTopology,
   JobResponse,
+  MailerDispatchResponse,
   PatchEditCaseRequest,
   PendingInterrupt,
   ResumeCaseRequest,
-  ReviewQueuePageResponse
+  ReviewQueuePageResponse,
+  SendVendorMailRequest
 } from "../types/jobs";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -211,6 +213,42 @@ export async function resumeAgentCase(
 
 export function openJobEventStream(jobId: string): EventSource {
   return new EventSource(apiUrl(`/api/jobs/${jobId}/events`));
+}
+
+export async function fetchMailerStatus(jobId: string): Promise<MailerDispatchResponse> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/mailer`));
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to fetch mailer status");
+  }
+  return (await response.json()) as MailerDispatchResponse;
+}
+
+export async function previewVendorMails(jobId: string): Promise<MailerDispatchResponse> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/mailer/preview`), {
+    method: "POST"
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to preview vendor mails");
+  }
+  return (await response.json()) as MailerDispatchResponse;
+}
+
+export async function sendVendorMails(
+  jobId: string,
+  body: SendVendorMailRequest
+): Promise<MailerDispatchResponse> {
+  const response = await fetch(apiUrl(`/api/jobs/${jobId}/mailer/send`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to send vendor mails");
+  }
+  return (await response.json()) as MailerDispatchResponse;
 }
 
 export async function createJob(

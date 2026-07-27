@@ -34,10 +34,12 @@ from backend.app.models import (
     FinalOutputPreviewResponse,
     GraphTopologyResponse,
     JobResponse,
+    MailerDispatchResponse,
     PatchEditCaseRequest,
     PendingInterrupt,
     ResumeCaseRequest,
     ReviewQueuePageResponse,
+    SendVendorMailRequest,
 )
 from backend.app.services.edit_cases import (
     bulk_patch_edit_outcomes,
@@ -48,8 +50,10 @@ from backend.app.services.edit_cases import (
     patch_edit_case,
 )
 from backend.app.services.job_store import JobStore
+from backend.app.services.mailer import get_vendor_mail_status, preview_vendor_mails, send_vendor_mails
 from backend.app.services.package_builder import PACKAGE_FILENAME, write_category_outputs_zip
 from backend.app.services.pipeline import apply_edits_and_package, package_after_hitl, process_uploaded_workbook_async
+from backend.app.integrations.smtp import SmtpError
 import asyncio
 import json
 from backend.app.agents.portfolio import build_case_counts
@@ -210,6 +214,68 @@ def preview_final_output(
         page_size=page_size,
         booking_id=booking_id,
     )
+
+
+def _require_succeeded_final_output(job_id: str) -> tuple[JobResponse, Path, Path]:
+    try:
+        snapshot = job_store.snapshot(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Job not found") from error
+
+    if snapshot.status == "running":
+        raise HTTPException(status_code=409, detail="Job is currently packaging; try again when it succeeds")
+    final_output_path = job_store.get_final_output_path(job_id)
+    job_dir = job_store.get_job_dir(job_id)
+    if (
+        snapshot.status != "succeeded"
+        or final_output_path is None
+        or not final_output_path.exists()
+        or job_dir is None
+    ):
+        raise HTTPException(status_code=409, detail="Final output is not ready yet")
+    return snapshot, job_dir, final_output_path
+
+
+@app.get("/api/jobs/{job_id}/mailer", response_model=MailerDispatchResponse)
+def get_mailer_status(job_id: str) -> MailerDispatchResponse:
+    snapshot, job_dir, _final_output_path = _require_succeeded_final_output(job_id)
+    del snapshot
+    return MailerDispatchResponse(**get_vendor_mail_status(job_dir=job_dir))
+
+
+@app.post("/api/jobs/{job_id}/mailer/preview", response_model=MailerDispatchResponse)
+async def preview_mailer(job_id: str) -> MailerDispatchResponse:
+    _snapshot, job_dir, final_output_path = _require_succeeded_final_output(job_id)
+    try:
+        payload = await preview_vendor_mails(
+            job_id=job_id,
+            job_dir=job_dir,
+            final_output_path=final_output_path,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SmtpError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return MailerDispatchResponse(**payload)
+
+
+@app.post("/api/jobs/{job_id}/mailer/send", response_model=MailerDispatchResponse)
+async def send_mailer(job_id: str, body: SendVendorMailRequest) -> MailerDispatchResponse:
+    _snapshot, job_dir, final_output_path = _require_succeeded_final_output(job_id)
+    try:
+        payload = await send_vendor_mails(
+            job_id=job_id,
+            job_dir=job_dir,
+            final_output_path=final_output_path,
+            preview_token=body.preview_token,
+        )
+    except ValueError as error:
+        detail = str(error)
+        status_code = 409 if "already" in detail.casefold() or "stale" in detail.casefold() or "progress" in detail.casefold() else 422
+        raise HTTPException(status_code=status_code, detail=detail) from error
+    except SmtpError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return MailerDispatchResponse(**payload)
 
 
 @app.get("/api/jobs/{job_id}/categories/download")

@@ -578,3 +578,149 @@ def test_paged_category_cases_and_review_queue_endpoints(tmp_path: Path) -> None
         assert review_payload["page_size"] == 5
         assert review_payload["total_pages"] == 3
         assert [item["booking_id"] for item in review_payload["items"]] == ["B6", "B7", "B8", "B9", "B10"]
+
+
+def test_mailer_endpoints_preview_send_and_gates(tmp_path: Path, monkeypatch) -> None:
+    from backend.app.integrations.smtp import InMemoryMailTransport
+
+    monkeypatch.setenv("MAILER_RECIPIENTS", "one@go-mmt.com,two@go-mmt.com,three@go-mmt.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "secret")
+    transport = InMemoryMailTransport()
+    monkeypatch.setattr("backend.app.services.mailer.live_mail_transport_from_env", lambda: transport)
+
+    job_id = uuid4().hex
+    job_dir = tmp_path / job_id
+    processed_path = job_dir / "category_files" / "processed" / "cab-delay.xlsx"
+    prepared_path = job_dir / "category_files" / "prepared" / "cab-delay.xlsx"
+    upload_path = job_dir / "input.xlsx"
+    package_path = job_dir / "agentic_loss_recovery_package.zip"
+    final_output_path = job_dir / "final_output.xlsx"
+    agent_audit_path = job_dir / "agent_audit.xlsx"
+    review_queue_path = job_dir / "review_queue.xlsx"
+    agent_summary_path = job_dir / "agent_summary.json"
+
+    processed_path.parent.mkdir(parents=True)
+    prepared_path.parent.mkdir(parents=True)
+    rows = [
+        {
+            "Booking ID": f"B{index}",
+            "Sub Category": "Cab Delay",
+            "Recoverable": index * 10,
+            MESSAGE_COLUMN: "Cab Delay",
+            COMMENTS_COLUMN: f"comment {index}" if index == 1 else "",
+        }
+        for index in range(1, 4)
+    ]
+    pd.DataFrame(rows).to_excel(processed_path, index=False)
+    pd.DataFrame(rows).to_excel(prepared_path, index=False)
+    final_rows = [
+        {
+            "booking_id": row["Booking ID"],
+            "complaint_reasons": row["Sub Category"],
+            "complaint_against": "dispatch_id",
+            "complaint_against_id": f"dispatch-{row['Booking ID'].lower()}",
+            "title": "Service Issue",
+            "message": row[MESSAGE_COLUMN],
+            "fine": row["Recoverable"],
+        }
+        for row in rows
+    ]
+    pd.DataFrame(final_rows, columns=FINAL_EXPORT_COLUMNS).to_excel(final_output_path, index=False)
+    pd.DataFrame(final_rows).to_excel(agent_audit_path, index=False)
+    pd.DataFrame(final_rows).to_excel(review_queue_path, index=False)
+    upload_path.write_bytes(b"input")
+    package_path.write_bytes(b"zip")
+    agent_summary_path.write_text("{}", encoding="utf-8")
+
+    main.job_store.create_job(
+        job_id=job_id,
+        original_filename="input.xlsx",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
+        job_dir=job_dir,
+        upload_path=upload_path,
+    )
+    main.job_store.complete_job(
+        job_id,
+        metrics={},
+        category_outputs=[
+            {
+                "name": "Cab Delay",
+                "slug": "cab-delay",
+                "row_count": len(rows),
+                "output_columns": list(rows[0].keys()),
+                "prepared_filename": "category_files/prepared/cab-delay.xlsx",
+                "processed_filename": "category_files/processed/cab-delay.xlsx",
+                "status": "completed",
+                "error": None,
+            }
+        ],
+        package_path=package_path,
+        final_output_path=final_output_path,
+        final_output={
+            "filename": "final_output.xlsx",
+            "row_count": len(rows),
+            "columns": FINAL_EXPORT_COLUMNS,
+            "download_ready": True,
+        },
+        agent_audit_path=agent_audit_path,
+        review_queue_path=review_queue_path,
+        agent_summary_path=agent_summary_path,
+        agent_summary={},
+        case_counts={"total_cases": len(rows)},
+        agent_progress=[],
+        agent_cases=[],
+    )
+
+    awaiting_job_id = uuid4().hex
+    awaiting_dir = tmp_path / awaiting_job_id
+    awaiting_dir.mkdir()
+    awaiting_upload = awaiting_dir / "input.xlsx"
+    awaiting_upload.write_bytes(b"input")
+    main.job_store.create_job(
+        job_id=awaiting_job_id,
+        original_filename="input.xlsx",
+        start_date="2026-03-19",
+        end_date="2026-03-19",
+        job_dir=awaiting_dir,
+        upload_path=awaiting_upload,
+    )
+
+    with TestClient(main.app) as client:
+        blocked = client.post(f"/api/jobs/{awaiting_job_id}/mailer/preview")
+        assert blocked.status_code == 409
+
+        preview = client.post(f"/api/jobs/{job_id}/mailer/preview")
+        assert preview.status_code == 200
+        preview_payload = preview.json()
+        assert preview_payload["status"] == "preview_ready"
+        assert preview_payload["can_send"] is True
+        assert len(preview_payload["drafts"]) == 3
+        assert preview_payload["preview_token"]
+
+        status = client.get(f"/api/jobs/{job_id}/mailer")
+        assert status.status_code == 200
+        assert status.json()["preview_token"] == preview_payload["preview_token"]
+
+        bad_token = client.post(
+            f"/api/jobs/{job_id}/mailer/send",
+            json={"preview_token": "not-the-token"},
+        )
+        assert bad_token.status_code in {409, 422}
+
+        sent = client.post(
+            f"/api/jobs/{job_id}/mailer/send",
+            json={"preview_token": preview_payload["preview_token"]},
+        )
+        assert sent.status_code == 200
+        sent_payload = sent.json()
+        assert sent_payload["status"] == "sent"
+        assert sent_payload["can_send"] is False
+        assert len(transport.sent) == 3
+
+        again = client.post(
+            f"/api/jobs/{job_id}/mailer/send",
+            json={"preview_token": preview_payload["preview_token"]},
+        )
+        assert again.status_code == 409
+        assert "already" in again.json()["detail"].lower()

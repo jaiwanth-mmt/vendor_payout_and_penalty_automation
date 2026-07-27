@@ -1,11 +1,12 @@
 /**
- * JobOutputsPage — final XLSX + category Excel previews/downloads.
+ * JobOutputsPage — vendor mailer + final XLSX + category Excel previews/downloads.
  */
 import { Package } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import CategoryPreview from "../components/CategoryPreview";
 import FinalOutputPreview from "../components/FinalOutputPreview";
+import VendorMailerPanel from "../components/VendorMailerPanel";
 import { useJob } from "../context/JobProvider";
 
 export default function JobOutputsPage() {
@@ -36,6 +37,7 @@ export default function JobOutputsPage() {
 
   return (
     <div className="outputsPage">
+      {jobId ? <VendorMailerPanel jobId={jobId} isComplete={isComplete} /> : null}
       <FinalOutputPreview job={job} isComplete={isComplete} onDownload={downloadFinalOutput} />
       <CategoryPreview job={job} isComplete={isComplete} onDownload={downloadCategoryOutputs} />
     </div>

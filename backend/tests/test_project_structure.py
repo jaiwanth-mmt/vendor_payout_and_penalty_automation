@@ -27,6 +27,9 @@ def test_tracking_infrastructure_modules_exist() -> None:
     assert (REPO_ROOT / "backend" / "app" / "integrations" / "tracking" / "repository.py").exists()
     assert (REPO_ROOT / "backend" / "app" / "core" / "tracking_utils.py").exists()
     assert (REPO_ROOT / "backend" / "app" / "integrations" / "llm_client.py").exists()
+    assert (REPO_ROOT / "backend" / "app" / "integrations" / "smtp.py").exists()
+    assert (REPO_ROOT / "backend" / "app" / "services" / "mailer.py").exists()
+    assert (REPO_ROOT / "backend" / "app" / "agents" / "mailer" / "graphs.py").exists()
 
 
 def test_pipeline_facade_reexports_agent_friendly_modules() -> None:

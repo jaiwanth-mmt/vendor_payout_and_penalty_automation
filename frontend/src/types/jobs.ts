@@ -105,6 +105,7 @@ export type PendingInterrupt = {
 export type GraphTopology = {
   case: { nodes: string[]; mermaid: string };
   portfolio: { nodes: string[]; mermaid: string };
+  mailer?: { nodes: string[]; mermaid: string };
 };
 
 export type ToolCallRecord = {
@@ -363,4 +364,57 @@ export type BulkPatchEditCasesResponse = {
   unhandled_count: number;
   edited_case_count: number;
   excluded_case_count: number;
+};
+
+export type MailerStatus = "idle" | "preview_ready" | "sending" | "sent" | "partial" | "failed";
+
+export type MailerAssignment = {
+  recipient: string;
+  booking_id: string;
+  subject: string;
+};
+
+export type MailerDraftField = {
+  key: string;
+  value: string;
+};
+
+export type MailerDraft = {
+  recipient: string;
+  booking_id: string;
+  subject: string;
+  text_body: string;
+  html_body: string;
+  fields: MailerDraftField[];
+  title: string;
+  message: string;
+  fine: string;
+  call_transcript: string;
+};
+
+export type MailerSendResult = {
+  recipient: string;
+  booking_id: string;
+  status: "sent" | "failed";
+  message_id: string | null;
+  smtp_response: string;
+  error: string | null;
+  sent_at: string | null;
+};
+
+export type MailerDispatchResponse = {
+  status: MailerStatus;
+  preview_token: string | null;
+  final_output_checksum: string | null;
+  recipients: string[];
+  assignments: MailerAssignment[];
+  drafts: MailerDraft[];
+  results: MailerSendResult[];
+  sent_at: string | null;
+  error: string | null;
+  can_send: boolean;
+};
+
+export type SendVendorMailRequest = {
+  preview_token: string;
 };
