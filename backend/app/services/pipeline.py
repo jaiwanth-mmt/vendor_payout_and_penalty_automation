@@ -19,6 +19,7 @@ from backend.app.agents.orchestrator import (
 from backend.app.agents.runner import run_portfolio_for_job
 from backend.app.integrations.llm_client import call_azure_openai_async
 from backend.app.integrations.tracking import TrackingRepository, matched_booking_ids
+from backend.app.integrations.tracking_reports import booking_ids_missing_supplier_id
 from backend.app.domain.category_processors import (
     COMMON_PROCESSED_OUTPUT_COLUMNS,
     CategoryProcessingOutcome,
@@ -324,6 +325,35 @@ async def process_uploaded_workbook_async(
         )
     on_step_complete("tracking_matched", f"{len(matched_ids):,} bookings matched live tracking data")
 
+    discarded_ids = booking_ids_missing_supplier_id(tracking_bookings, booking_ids)
+    if discarded_ids:
+        emit_warning(
+            {
+                "code": "supplier_id_missing",
+                "message": f"{len(discarded_ids)} bookings discarded — supplier_id is NULL/missing on tracking rows.",
+                "booking_ids": discarded_ids,
+            }
+        )
+        discarded_set = set(discarded_ids)
+        prepared_df = prepared_df.loc[
+            ~prepared_df["Booking ID"].astype(str).str.strip().isin(discarded_set)
+        ].copy()
+        prepared_df.reset_index(drop=True, inplace=True)
+
+        for stale in prepared_dir.glob("*.xlsx"):
+            stale.unlink(missing_ok=True)
+
+        booking_ids = prepared_df["Booking ID"].fillna("").astype(str).str.strip().tolist()
+        category_batches = split_by_subcategory(prepared_df)
+        prepared_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.gather(
+            *[
+                asyncio.to_thread(write_workbook, batch.df, prepared_dir / f"{batch.slug}.xlsx")
+                for batch in category_batches
+            ]
+        )
+        init_category_progress(build_initial_category_progress(category_batches))
+
     on_step_start("categories_processed", "Processing each subcategory file independently")
     processed_dir.mkdir(parents=True, exist_ok=True)
     step_progress(
@@ -404,6 +434,7 @@ async def process_uploaded_workbook_async(
         "category_count": len(finalized_category_outputs),
         "tracking_matched_bookings": len(matched_ids),
         "tracking_unmatched_bookings": len(unmatched_booking_ids),
+        "supplier_id_discarded_bookings": len(discarded_ids),
         "agent_total_cases": case_counts["total_cases"],
         "agent_auto_ready_cases": case_counts["auto_ready"],
         "agent_needs_review_cases": case_counts["needs_review"],

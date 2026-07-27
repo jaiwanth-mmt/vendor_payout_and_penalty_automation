@@ -21,10 +21,27 @@ def test_is_airport_trip_type_accepts_airport_and_local() -> None:
 
 
 def test_compute_vendor_no_show_sop_fine_airport_and_outstation() -> None:
-    assert compute_vendor_no_show_sop_fine(amount=2828, ttrip_type="airport") == 500.0
-    assert compute_vendor_no_show_sop_fine(amount=800, ttrip_type="local") == 400.0
-    assert compute_vendor_no_show_sop_fine(amount=10000, ttrip_type="outstation") == 2000.0
-    assert compute_vendor_no_show_sop_fine(amount=4000, ttrip_type="roundtrip") == 1000.0
+    assert compute_vendor_no_show_sop_fine(amount=2828, ttrip_type="airport") == 500
+    assert compute_vendor_no_show_sop_fine(amount=800, ttrip_type="local") == 400
+    assert compute_vendor_no_show_sop_fine(amount=10000, ttrip_type="outstation") == 2000
+    assert compute_vendor_no_show_sop_fine(amount=4000, ttrip_type="roundtrip") == 1000
+
+
+def test_compute_vendor_no_show_sop_fine_half_up_rounding() -> None:
+    # 653 airport: min(0.5*653, 500) = 326.5 → half-up → 327
+    assert compute_vendor_no_show_sop_fine(amount=653, ttrip_type="airport") == 327
+    # 651 airport: min(0.5*651, 500) = 325.5 → half-up → 326
+    assert compute_vendor_no_show_sop_fine(amount=651, ttrip_type="airport") == 326
+    # 649 airport: min(0.5*649, 500) = 324.5 → half-up → 325
+    assert compute_vendor_no_show_sop_fine(amount=649, ttrip_type="airport") == 325
+    # 646 airport: min(0.5*646, 500) = 323.0 → exact → 323
+    assert compute_vendor_no_show_sop_fine(amount=646, ttrip_type="airport") == 323
+    # Fractional < 0.5 via 0.25 rate: 1281 outstation → 320.25 → 320
+    assert compute_vendor_no_show_sop_fine(amount=1281, ttrip_type="outstation") == 320
+    # Fractional > 0.5 via 0.25 rate: 1283 outstation → 320.75 → 321
+    assert compute_vendor_no_show_sop_fine(amount=1283, ttrip_type="outstation") == 321
+    # Exact half via 0.25 rate: 1282 outstation → 320.5 → 321
+    assert compute_vendor_no_show_sop_fine(amount=1282, ttrip_type="outstation") == 321
 
 
 def test_compute_vendor_no_show_sop_fine_missing_inputs() -> None:

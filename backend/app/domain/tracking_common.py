@@ -6,6 +6,7 @@ import pandas as pd
 
 from backend.app.core.tracking_utils import booking_comments, first_tracking_row
 from backend.app.domain.cab_delay_enrichment import COMMENTS_COLUMN
+from backend.app.integrations.tracking_reports import SUPPLIER_ID_COLUMN, booking_supplier_id
 
 COMPLAINT_AGAINST_COLUMN = "complaint_against"
 COMPLAINT_AGAINST_ID_COLUMN = "complaint_against_id"
@@ -45,6 +46,7 @@ COMMON_TRACKING_COLUMNS = [
     *COMPLAINT_METADATA_COLUMNS,
     *TRACKING_AMOUNT_COLUMNS,
     TTRIP_TYPE_COLUMN,
+    SUPPLIER_ID_COLUMN,
     COMMENTS_COLUMN,
 ]
 
@@ -70,6 +72,7 @@ def build_common_tracking_enrichment(bookings: dict[str, Any], booking_id: str) 
         for column in TRACKING_AMOUNT_COLUMNS
     })
     enrichment[TTRIP_TYPE_COLUMN] = tracking_cell_value(tracking_row.get(TTRIP_TYPE_COLUMN))
+    enrichment[SUPPLIER_ID_COLUMN] = booking_supplier_id(bookings, booking_id)
     enrichment[COMMENTS_COLUMN] = booking_comments(bookings, booking_id) or tracking_cell_value(
         tracking_row.get("comments")
     )

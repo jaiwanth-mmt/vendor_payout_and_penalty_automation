@@ -470,6 +470,53 @@ def compact_json_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_MISSING_SUPPLIER_STRINGS = frozenset({"", "nan", "null", "none", "<na>"})
+
+
+def supplier_id_from_tracking_row(row: dict[str, Any]) -> str:
+    """Return the ``supplier_id`` column value, treating None/blank/nan-like as empty."""
+    if not isinstance(row, dict):
+        return ""
+    raw = row.get(SUPPLIER_ID_COLUMN)
+    if raw is None:
+        return ""
+    try:
+        if pd.isna(raw):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(raw).strip()
+    if text.casefold() in _MISSING_SUPPLIER_STRINGS:
+        return ""
+    return text
+
+
+def booking_supplier_id(bookings: dict[str, Any], booking_id: str) -> str:
+    """First non-empty ``supplier_id`` across a booking's tracking_reports_raw rows."""
+    booking = bookings.get(booking_id, {})
+    if not isinstance(booking, dict):
+        return ""
+    rows = booking.get("tracking_reports_raw", [])
+    if not isinstance(rows, list):
+        return ""
+    for row in rows:
+        sid = supplier_id_from_tracking_row(row)
+        if sid:
+            return sid
+    return ""
+
+
+def booking_ids_missing_supplier_id(
+    bookings: dict[str, Any],
+    booking_ids: list[str],
+) -> list[str]:
+    """Return booking IDs whose tracking rows all have NULL/missing ``supplier_id``."""
+    return [
+        bid for bid in booking_ids
+        if bid and not booking_supplier_id(bookings, bid)
+    ]
+
+
 def build_booking_wise_output(
     penalty_df: pd.DataFrame,
     tracking_rows: list[dict[str, Any]],
