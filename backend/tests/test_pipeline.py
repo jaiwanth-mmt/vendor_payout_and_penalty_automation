@@ -10,6 +10,11 @@ import pytest
 
 from backend.app.core.paths import DEMO_TRACKING_JSON_PATH, DEMO_WORKBOOK_PATH
 from backend.app.integrations.tracking import InMemoryTrackingRepository
+from backend.app.integrations.tracking_reports import (
+    booking_ids_missing_supplier_id,
+    booking_supplier_id,
+    supplier_id_from_tracking_row,
+)
 from backend.app.domain.cab_delay_enrichment import (
     BOARDED_COLUMN,
     COMMENTS_COLUMN,
@@ -31,6 +36,7 @@ from backend.tests.factories import (
     mock_llm,
     write_sample_workbook,
     write_tracking_json,
+    write_tracking_json_with_extra_money,
     write_two_category_workbook,
 )
 
@@ -192,7 +198,8 @@ def test_process_uploaded_workbook_process_all_skips_date_filter(tmp_path: Path)
     assert result.metrics["raw_rows"] == 5
     assert result.metrics["date_filtered_rows"] == 5
     assert result.metrics["process_all"] == 1
-    assert result.metrics["prepared_rows"] == 2
+    assert result.metrics["prepared_rows"] == 1
+    assert result.metrics["supplier_id_discarded_bookings"] == 1
     assert result.awaiting_edit is True
 
 
@@ -201,7 +208,7 @@ def test_process_uploaded_workbook_reports_category_progress(tmp_path: Path) -> 
     tracking_path = tmp_path / "tracking.json"
     package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
-    write_tracking_json(tracking_path)
+    write_tracking_json_with_extra_money(tracking_path)
 
     initialized_categories: list[list[dict[str, object]]] = []
     category_updates: list[tuple[str, dict[str, object]]] = []
@@ -236,7 +243,7 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
     tracking_path = tmp_path / "tracking.json"
     package_path = tmp_path / "agentic_loss_recovery_package.zip"
     write_two_category_workbook(workbook_path)
-    write_tracking_json(tracking_path)
+    write_tracking_json_with_extra_money(tracking_path)
     original_processor = pipeline.process_category_batch_async
 
     async def failing_extra_money_processor(*args, **kwargs):
@@ -267,11 +274,10 @@ def test_category_processor_failure_writes_fallback_file_and_package(tmp_path: P
     output_df = pd.read_excel(extra_money_output, keep_default_na=False)
     assert package_path.exists()
     assert extra_money_output.exists()
-    assert_complaint_metadata(output_df.loc[0], "")
+    assert_complaint_metadata(output_df.loc[0], "dispatch-b5")
     failed_category = next(category for category in result.category_outputs if category["slug"] == "extra-money-taken")
     assert failed_category["status"] == "failed"
     assert failed_category["error"] == "processor boom"
-    assert warnings[0]["code"] == "tracking_not_found"
     assert any(warning["code"] == "category_processing_failed" for warning in warnings)
 
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
@@ -337,6 +343,92 @@ def test_demo_workbook_creates_one_processed_xlsx_per_subcategory(tmp_path: Path
         assert sum(name.startswith("category_files/processed/") for name in names) == 9
 
 
+def test_null_supplier_id_discards_booking_and_emits_warning(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "qliksense.xlsx"
+    tracking_path = tmp_path / "tracking.json"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
+    write_two_category_workbook(workbook_path)
+    tracking_payload = {
+        "bookings": {
+            "B1": {
+                "penalty": {"sub_category": "Cab Delay", "remarks": "Cab Delay"},
+                "tracking_reports_raw": [
+                    {
+                        "dispatch_id": "dispatch-b1",
+                        "vendor_name": "savaari",
+                        "order_reference_number": "B1",
+                        "supplier_id": "S1",
+                    }
+                ],
+                "comments": "Customer reported cab delay.",
+            },
+            "B5": {
+                "penalty": {"sub_category": "Extra Money Taken", "remarks": "driver collected extra"},
+                "tracking_reports_raw": [
+                    {
+                        "dispatch_id": "dispatch-b5",
+                        "vendor_name": "taxibazaar",
+                        "order_reference_number": "B5",
+                        "supplier_id": None,
+                    }
+                ],
+                "comments": "Customer said driver collected extra.",
+            },
+        }
+    }
+    tracking_path.write_text(json.dumps(tracking_payload), encoding="utf-8")
+
+    warnings: list[dict[str, object]] = []
+    result = process_uploaded_workbook(
+        input_path=workbook_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
+        output_package_path=package_path,
+        start_date="2026-03-19",
+        end_date="2026-03-19",
+        on_step_start=lambda _step_id, _message: None,
+        on_step_complete=lambda _step_id, _message: None,
+        on_warning=warnings.append,
+        reason_generator=mock_llm,
+        job_id="null-supplier-id-job",
+    )
+
+    supplier_warnings = [w for w in warnings if w["code"] == "supplier_id_missing"]
+    assert len(supplier_warnings) == 1
+    assert "B5" in supplier_warnings[0]["booking_ids"]
+    assert result.metrics["supplier_id_discarded_bookings"] == 1
+    assert result.metrics["prepared_rows"] == 1
+    assert result.metrics["category_count"] == 1
+    category_names = [c["name"] for c in result.category_outputs]
+    assert "Extra Money Taken" not in category_names
+
+
+def test_supplier_id_present_in_processed_category_output(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "qliksense.xlsx"
+    tracking_path = tmp_path / "tracking.json"
+    package_path = tmp_path / "agentic_loss_recovery_package.zip"
+    write_sample_workbook(workbook_path)
+    write_tracking_json(tracking_path)
+
+    result = process_uploaded_workbook(
+        input_path=workbook_path,
+        tracking_repository=InMemoryTrackingRepository(json_path=tracking_path),
+        output_package_path=package_path,
+        start_date="2026-03-19",
+        end_date="2026-03-19",
+        on_step_start=lambda _step_id, _message: None,
+        on_step_complete=lambda _step_id, _message: None,
+        on_warning=lambda _warning: None,
+        reason_generator=mock_llm,
+        job_id="supplier-id-column-job",
+    )
+
+    cab_delay_output = tmp_path / "category_files" / "processed" / "cab-delay.xlsx"
+    output_df = pd.read_excel(cab_delay_output, keep_default_na=False)
+    assert "supplier_id" in output_df.columns.tolist()
+    assert output_df.loc[0, "supplier_id"] == "S1"
+    assert "supplier_id" in result.category_outputs[0]["output_columns"]
+
+
 def test_process_uploaded_workbook_reports_missing_columns(tmp_path: Path) -> None:
     workbook_path = tmp_path / "bad.xlsx"
     tracking_path = tmp_path / "tracking.json"
@@ -355,3 +447,38 @@ def test_process_uploaded_workbook_reports_missing_columns(tmp_path: Path) -> No
             on_warning=lambda _warning: None,
             reason_generator=lambda _prompt, _tokens, _effort: "unused",
         )
+
+
+def test_supplier_id_from_tracking_row_treats_null_blank_nan_as_missing() -> None:
+    assert supplier_id_from_tracking_row({"supplier_id": "42"}) == "42"
+    assert supplier_id_from_tracking_row({"supplier_id": None}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": ""}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": "  "}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": "nan"}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": "NaN"}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": "null"}) == ""
+    assert supplier_id_from_tracking_row({"supplier_id": "None"}) == ""
+    assert supplier_id_from_tracking_row({}) == ""
+
+
+def test_booking_supplier_id_returns_first_non_empty() -> None:
+    bookings = {
+        "B1": {
+            "tracking_reports_raw": [
+                {"supplier_id": None},
+                {"supplier_id": "S99"},
+            ]
+        }
+    }
+    assert booking_supplier_id(bookings, "B1") == "S99"
+    assert booking_supplier_id(bookings, "B_MISSING") == ""
+
+
+def test_booking_ids_missing_supplier_id_filters_correctly() -> None:
+    bookings = {
+        "B1": {"tracking_reports_raw": [{"supplier_id": "S1"}]},
+        "B2": {"tracking_reports_raw": [{"supplier_id": None}]},
+        "B3": {"tracking_reports_raw": []},
+    }
+    result = booking_ids_missing_supplier_id(bookings, ["B1", "B2", "B3", "B4"])
+    assert result == ["B2", "B3", "B4"]

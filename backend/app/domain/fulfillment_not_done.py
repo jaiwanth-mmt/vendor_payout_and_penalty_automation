@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import pandas as pd
@@ -64,6 +65,11 @@ def is_airport_trip_type(ttrip_type: object) -> bool:
     return _clean_text(ttrip_type).casefold() in AIRPORT_TRIP_TYPES
 
 
+def _round_half_up_to_int(value: Decimal) -> float:
+    """Round to nearest integer with half-up (>= 0.5 rounds away from zero)."""
+    return float(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
 def compute_vendor_no_show_sop_fine(*, amount: object, ttrip_type: object) -> float | None:
     """Return SOP fine for Vendor No Show, or None when inputs are missing/invalid."""
     trip = _clean_text(ttrip_type)
@@ -72,9 +78,12 @@ def compute_vendor_no_show_sop_fine(*, amount: object, ttrip_type: object) -> fl
     booking_amount = _parse_positive_amount(amount)
     if booking_amount is None:
         return None
+    amount_dec = Decimal(str(booking_amount))
     if is_airport_trip_type(trip):
-        return round(min(0.5 * booking_amount, 500.0), 2)
-    return round(min(0.25 * booking_amount, 2000.0), 2)
+        fine = min(amount_dec * Decimal("0.5"), Decimal("500"))
+    else:
+        fine = min(amount_dec * Decimal("0.25"), Decimal("2000"))
+    return _round_half_up_to_int(fine)
 
 
 def is_vendor_no_show_category(sub_category: object) -> bool:

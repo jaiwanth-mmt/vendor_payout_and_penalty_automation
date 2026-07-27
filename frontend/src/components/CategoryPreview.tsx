@@ -16,6 +16,7 @@ const KEY_PREVIEW_COLUMNS = [
   "Booking ID",
   "Sub Category",
   "vendor_name",
+  "supplier_id",
   "amount",
   "ttrip_type",
   "Recoverable",

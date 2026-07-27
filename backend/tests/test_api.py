@@ -59,6 +59,7 @@ def write_tracking_json(path: Path) -> None:
                         "dispatch_id": "dispatch-b1",
                         "vendor_name": "savaari",
                         "order_reference_number": "B1",
+                        "supplier_id": "S1",
                         "start_time": "2026-03-19 04:30:00",
                         "driver_started": "2026-03-19 10:20:00",
                         "driver_arrived": "2026-03-19 10:40:00",
