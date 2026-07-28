@@ -11,10 +11,11 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from openpyxl import load_workbook
 
 from backend.app.core.env import load_env_file
-from backend.app.core.paths import JOB_RUNTIME_ROOT, REPO_ROOT
+from backend.app.core.paths import FRONTEND_DIST, JOB_RUNTIME_ROOT, REPO_ROOT
 from backend.app.agents.orchestrator import review_queue_row
 from backend.app.agents.runner import (
     get_graph_topology,
@@ -1033,3 +1034,36 @@ def serialize_preview_cell(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def mount_frontend_spa(application: FastAPI) -> None:
+    """Serve the Vite build when frontend/dist exists (Docker single-image / production).
+
+    No-op for local API-only runs where the UI is served by Vite on :5173.
+    Registered after /api routes so API paths always win.
+    """
+    index_html = FRONTEND_DIST / "index.html"
+    if not index_html.is_file():
+        return
+
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        application.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @application.get("/")
+    def spa_index() -> FileResponse:
+        return FileResponse(index_html)
+
+    @application.get("/{full_path:path}")
+    def spa_fallback(full_path: str) -> FileResponse:
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        try:
+            candidate.relative_to(FRONTEND_DIST.resolve())
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Not found") from error
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index_html)
+
+
+mount_frontend_spa(app)

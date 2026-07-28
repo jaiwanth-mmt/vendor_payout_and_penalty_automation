@@ -7,6 +7,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
 DATA_ROOT = REPO_ROOT / "data"
 DEMO_DATA_ROOT = DATA_ROOT / "demo"
+FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 RUNTIME_ROOT = BACKEND_ROOT / ".runtime"
 JOB_RUNTIME_ROOT = RUNTIME_ROOT / "jobs"
 LANGGRAPH_RUNTIME_ROOT = RUNTIME_ROOT / "langgraph"

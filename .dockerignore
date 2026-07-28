@@ -1,0 +1,21 @@
+.git
+.venv
+.env
+**/.DS_Store
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+**/*.tsbuildinfo
+
+# Local / generated runtime and frontend artifacts
+backend/.runtime
+frontend/node_modules
+frontend/dist
+frontend/node_modules/.tmp
+
+# Not required to build or run the API/UI images
+graphify-out
+docs
+data
+backend/tests
+AGENTS.md
