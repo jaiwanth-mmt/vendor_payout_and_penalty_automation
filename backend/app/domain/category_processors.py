@@ -14,6 +14,7 @@ from backend.app.domain.cab_delay_enrichment import (
     enrich_cab_delay_rows,
 )
 from backend.app.integrations.llm_client import call_llm_sync, maybe_call_llm
+from backend.app.integrations.llm_usage import llm_purpose
 from backend.app.domain.complaint_message import (
     MESSAGE_COLUMN,
     build_message_from_row,
@@ -318,12 +319,13 @@ def enrich_lower_category_vehicle(
 
         prompt = build_lower_category_vehicle_prompt(booking_id=booking_id, comments=comments)
         try:
-            response = call_azure_or_custom_sync(
-                llm_generator,
-                prompt,
-                max_completion_tokens,
-                reasoning_effort,
-            )
+            with llm_purpose("lower_category_vehicle"):
+                response = call_azure_or_custom_sync(
+                    llm_generator,
+                    prompt,
+                    max_completion_tokens,
+                    reasoning_effort,
+                )
             extracted = parse_lower_category_vehicle_response(response)
         except Exception:
             failed_booking_ids.append(booking_id)
@@ -370,7 +372,10 @@ async def enrich_lower_category_vehicle_async(
         prompt = build_lower_category_vehicle_prompt(booking_id=booking_id, comments=comments)
         try:
             async with semaphore:
-                response = await maybe_call_llm(llm_generator, prompt, max_completion_tokens, reasoning_effort)
+                with llm_purpose("lower_category_vehicle"):
+                    response = await maybe_call_llm(
+                        llm_generator, prompt, max_completion_tokens, reasoning_effort
+                    )
             return "extracted", index, booking_id, parse_lower_category_vehicle_response(response)
         except Exception:
             return "failed", index, booking_id, None

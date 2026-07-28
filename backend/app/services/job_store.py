@@ -6,6 +6,11 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from backend.app.integrations.llm_usage import (
+    LlmTokenUsage,
+    apply_usage_event,
+    empty_llm_usage_summary,
+)
 from backend.app.models import JobResponse, PendingInterrupt, WarningItem
 
 
@@ -207,6 +212,7 @@ class JobStore:
                 "pending_interrupts": [],
                 "graph_topology": None,
                 "investigation_summary": empty_investigation_summary(),
+                "llm_usage": empty_llm_usage_summary(),
                 "_investigation_tracker": {stage_id: set() for stage_id, _ in INVESTIGATION_STAGE_DEFS},
                 "_investigation_pending_review": set(),
                 "_investigation_seen": set(),
@@ -404,6 +410,34 @@ class JobStore:
             job["graph_topology"] = topology
             job["updated_at"] = utc_now()
 
+    def record_llm_usage(
+        self,
+        job_id: str,
+        purpose: str,
+        usage: LlmTokenUsage,
+        *,
+        calls: int = 1,
+    ) -> None:
+        with self._lock:
+            job = self._get_job(job_id)
+            summary = job.get("llm_usage")
+            if not isinstance(summary, dict):
+                summary = empty_llm_usage_summary()
+            apply_usage_event(summary, purpose=purpose, usage=usage, calls=calls)
+            job["llm_usage"] = summary
+            job["updated_at"] = utc_now()
+
+    def set_llm_usage_case_count(self, job_id: str, case_count: int) -> None:
+        with self._lock:
+            job = self._get_job(job_id)
+            summary = job.get("llm_usage")
+            if not isinstance(summary, dict):
+                summary = empty_llm_usage_summary(case_count=case_count)
+            else:
+                summary["case_count"] = max(0, int(case_count))
+            job["llm_usage"] = summary
+            job["updated_at"] = utc_now()
+
     def mark_awaiting_edit(
         self,
         job_id: str,
@@ -428,6 +462,11 @@ class JobStore:
             job["download_ready"] = False
             job.setdefault("_investigation_pending_review", set()).clear()
             rebuild_investigation_summary(job)
+            usage = job.get("llm_usage")
+            if not isinstance(usage, dict):
+                usage = empty_llm_usage_summary()
+            usage["case_count"] = len(agent_cases)
+            job["llm_usage"] = usage
             job["updated_at"] = now
             step = self._get_step(job, "agent_investigation")
             step["status"] = "warning"
@@ -546,6 +585,11 @@ class JobStore:
             tracker.setdefault("vendor_penalty_analysis", set()).add("__job__")
             job.setdefault("_investigation_pending_review", set()).clear()
             rebuild_investigation_summary(job)
+            usage = job.get("llm_usage")
+            if not isinstance(usage, dict):
+                usage = empty_llm_usage_summary()
+            usage["case_count"] = len(agent_cases)
+            job["llm_usage"] = usage
             job["updated_at"] = now
 
     def fail_job(self, job_id: str, error: str) -> None:
@@ -596,6 +640,8 @@ class JobStore:
         ]
         if not payload.get("investigation_summary"):
             payload["investigation_summary"] = empty_investigation_summary()
+        if not payload.get("llm_usage"):
+            payload["llm_usage"] = empty_llm_usage_summary()
         # Technical detail only — keep a short tail for the collapsed UI panel.
         payload["graph_events"] = list(payload.get("graph_events") or [])[-GRAPH_EVENT_RETENTION:]
         return JobResponse(**payload)

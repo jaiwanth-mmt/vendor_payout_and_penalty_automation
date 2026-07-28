@@ -13,6 +13,7 @@ from backend.app.agents.llm import (
 )
 from backend.app.agents.models import clean_number, clean_text
 from backend.app.agents.specialists import llm_error_label
+from backend.app.integrations.llm_usage import llm_purpose
 
 
 UNKNOWN_VENDOR_NAME = "Unknown vendor"
@@ -118,13 +119,14 @@ async def build_portfolio_summary_async(
 
     try:
         semaphore = asyncio.Semaphore(max(1, llm_concurrency))
-        response = await maybe_call_agent_llm(
-            llm_generator,
-            build_portfolio_prompt(fallback_summary=fallback_summary),
-            max_completion_tokens=4096,
-            reasoning_effort="medium",
-            semaphore=semaphore,
-        )
+        with llm_purpose("portfolio"):
+            response = await maybe_call_agent_llm(
+                llm_generator,
+                build_portfolio_prompt(fallback_summary=fallback_summary),
+                max_completion_tokens=4096,
+                reasoning_effort="medium",
+                semaphore=semaphore,
+            )
         payload = parse_json_object(response)
         return validate_portfolio_payload(payload, fallback_summary)
     except Exception as error:

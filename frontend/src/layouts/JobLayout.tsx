@@ -1,5 +1,5 @@
 /**
- * JobLayout — stage stepper (Progress · Edit · Review · Outputs) + status + child page outlet.
+ * JobLayout — stage stepper (Progress · Edit · Review · Outputs · Usage) + status + child page outlet.
  * Locked stages use aria-disabled; soft unlock from job status flags via useJob().
  */
 import { Activity, ArrowLeft } from "lucide-react";
@@ -7,7 +7,7 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useJob } from "../context/JobProvider";
 
-type StageKey = "progress" | "edit" | "review" | "outputs";
+type StageKey = "progress" | "edit" | "review" | "outputs" | "usage";
 
 function stageDisabledReason(
   key: StageKey,
@@ -26,7 +26,7 @@ function stageDisabledReason(
   if (key === "review" && !flags.showAgentWorkspace) {
     return "Available after you approve edits";
   }
-  if (key === "outputs" && !flags.isComplete) {
+  if ((key === "outputs" || key === "usage") && !flags.isComplete) {
     return "Available after the job succeeds";
   }
   return null;
@@ -87,6 +87,7 @@ export default function JobLayout() {
     { key: "edit", label: "Edit", to: `/jobs/${jobId}/edit` },
     { key: "review", label: "Review", to: `/jobs/${jobId}/review` },
     { key: "outputs", label: "Outputs", to: `/jobs/${jobId}/outputs` },
+    { key: "usage", label: "Usage", to: `/jobs/${jobId}/usage` },
   ];
 
   return (
