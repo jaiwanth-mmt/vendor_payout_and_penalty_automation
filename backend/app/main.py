@@ -22,7 +22,9 @@ from backend.app.agents.runner import (
     get_pending_interrupts,
     resume_case,
 )
+from backend.app.integrations.llm_usage import LlmTokenUsage, bind_usage_recorder
 from backend.app.integrations.tracking import live_tracking_repository_from_env
+from backend.app.integrations.smtp import SmtpError
 from backend.app.models import (
     AgentCasesPageResponse,
     BulkPatchEditCasesRequest,
@@ -53,7 +55,6 @@ from backend.app.services.job_store import JobStore
 from backend.app.services.mailer import get_vendor_mail_status, preview_vendor_mails, send_vendor_mails
 from backend.app.services.package_builder import PACKAGE_FILENAME, write_category_outputs_zip
 from backend.app.services.pipeline import apply_edits_and_package, package_after_hitl, process_uploaded_workbook_async
-from backend.app.integrations.smtp import SmtpError
 import asyncio
 import json
 from backend.app.agents.portfolio import build_case_counts
@@ -711,17 +712,22 @@ async def _complete_job_after_edits(job_id: str) -> None:
         from backend.app.services.job_store import utc_now
 
         job["updated_at"] = utc_now()
-    packaged = await apply_edits_and_package(
-        job_dir=job_dir,
-        output_package_path=job_dir / PACKAGE_FILENAME,
-        start_date=str(job.get("start_date") or ""),
-        end_date=str(job.get("end_date") or ""),
-        category_outputs=list(job.get("category_outputs") or []),
-        agent_cases=agent_cases,
-        metrics=dict(job.get("metrics") or {}),
-        job_id=job_id,
-        on_event=lambda event: job_store.append_graph_event(job_id, event),
-    )
+
+    def _record_usage(purpose: str, usage: LlmTokenUsage) -> None:
+        job_store.record_llm_usage(job_id, purpose, usage)
+
+    with bind_usage_recorder(_record_usage):
+        packaged = await apply_edits_and_package(
+            job_dir=job_dir,
+            output_package_path=job_dir / PACKAGE_FILENAME,
+            start_date=str(job.get("start_date") or ""),
+            end_date=str(job.get("end_date") or ""),
+            category_outputs=list(job.get("category_outputs") or []),
+            agent_cases=agent_cases,
+            metrics=dict(job.get("metrics") or {}),
+            job_id=job_id,
+            on_event=lambda event: job_store.append_graph_event(job_id, event),
+        )
     job_store.mark_step_completed(job_id, "agent_investigation", "LangGraph investigation completed")
     job_store.mark_step_completed(job_id, "package_prepared", "ZIP package ready after human edits")
     job_store.complete_job(
@@ -791,33 +797,37 @@ async def run_processing_job(
         total_cases = sum(int(category.get("row_count") or 0) for category in categories)
         job_store.init_investigation_progress(job_id, total_cases=total_cases)
 
+    def _record_usage(purpose: str, usage: LlmTokenUsage) -> None:
+        job_store.record_llm_usage(job_id, purpose, usage)
+
     try:
         job_store.mark_step_running(job_id, "agent_investigation", "LangGraph investigation pending category processing")
         job_store.set_graph_topology(job_id, get_graph_topology(job_id))
         tracking_repository = live_tracking_repository_from_env()
-        result = await process_uploaded_workbook_async(
-            input_path=upload_path,
-            tracking_repository=tracking_repository,
-            output_package_path=job_dir / PACKAGE_FILENAME,
-            start_date=start_date,
-            end_date=end_date,
-            process_all=process_all,
-            on_step_start=lambda step_id, message: job_store.mark_step_running(job_id, step_id, message),
-            on_step_complete=lambda step_id, message: job_store.mark_step_completed(job_id, step_id, message),
-            on_warning=lambda warning: job_store.add_warning(job_id, warning),
-            on_step_progress=lambda step_id, completed_units, total_units, message: job_store.update_step_units(
-                job_id,
-                step_id,
-                completed_units=completed_units,
-                total_units=total_units,
-                message=message,
-            ),
-            on_category_progress_initialized=_init_category_and_investigation,
-            on_category_progress=lambda slug, update: job_store.update_category_progress(job_id, slug, **update),
-            job_id=job_id,
-            enable_hitl=False,
-            on_agent_event=lambda event: job_store.append_graph_event(job_id, event),
-        )
+        with bind_usage_recorder(_record_usage):
+            result = await process_uploaded_workbook_async(
+                input_path=upload_path,
+                tracking_repository=tracking_repository,
+                output_package_path=job_dir / PACKAGE_FILENAME,
+                start_date=start_date,
+                end_date=end_date,
+                process_all=process_all,
+                on_step_start=lambda step_id, message: job_store.mark_step_running(job_id, step_id, message),
+                on_step_complete=lambda step_id, message: job_store.mark_step_completed(job_id, step_id, message),
+                on_warning=lambda warning: job_store.add_warning(job_id, warning),
+                on_step_progress=lambda step_id, completed_units, total_units, message: job_store.update_step_units(
+                    job_id,
+                    step_id,
+                    completed_units=completed_units,
+                    total_units=total_units,
+                    message=message,
+                ),
+                on_category_progress_initialized=_init_category_and_investigation,
+                on_category_progress=lambda slug, update: job_store.update_category_progress(job_id, slug, **update),
+                job_id=job_id,
+                enable_hitl=False,
+                on_agent_event=lambda event: job_store.append_graph_event(job_id, event),
+            )
         job_store.set_graph_topology(job_id, get_graph_topology(job_id))
         if result.awaiting_edit:
             job_store.mark_awaiting_edit(

@@ -10,6 +10,7 @@ import JobEditPage from "./pages/JobEditPage";
 import JobOutputsPage from "./pages/JobOutputsPage";
 import JobProgressPage from "./pages/JobProgressPage";
 import JobReviewPage from "./pages/JobReviewPage";
+import JobUsagePage from "./pages/JobUsagePage";
 import NewJobPage from "./pages/NewJobPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="edit" element={<JobEditPage />} />
           <Route path="review" element={<JobReviewPage />} />
           <Route path="outputs" element={<JobOutputsPage />} />
+          <Route path="usage" element={<JobUsagePage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>

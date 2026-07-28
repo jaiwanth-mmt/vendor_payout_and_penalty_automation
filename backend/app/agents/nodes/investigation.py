@@ -32,6 +32,7 @@ from backend.app.agents.policy import (
 )
 from backend.app.agents.source_alignment import build_source_alignment_async
 from backend.app.agents.tools import INVESTIGATION_TOOLS
+from backend.app.integrations.llm_usage import llm_purpose
 
 
 async def intake_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -227,13 +228,14 @@ async def specialist_node(
             fallback_decision=fallback_decision,
             guardrails=guardrail_payload(case),
         )
-        response = await maybe_call_agent_llm(
-            llm_generator,
-            prompt,
-            max_completion_tokens=8192,
-            reasoning_effort="medium",
-            semaphore=semaphore,
-        )
+        with llm_purpose("specialist"):
+            response = await maybe_call_agent_llm(
+                llm_generator,
+                prompt,
+                max_completion_tokens=8192,
+                reasoning_effort="medium",
+                semaphore=semaphore,
+            )
         payload = parse_json_object(response)
         decision = decision_from_payload(
             payload,
@@ -341,13 +343,14 @@ async def judge_node(
             fallback_decision=fallback_decision,
             guardrails=guardrail_payload(case),
         )
-        response = await maybe_call_agent_llm(
-            llm_generator,
-            prompt,
-            max_completion_tokens=8192,
-            reasoning_effort="high",
-            semaphore=semaphore,
-        )
+        with llm_purpose("judge"):
+            response = await maybe_call_agent_llm(
+                llm_generator,
+                prompt,
+                max_completion_tokens=8192,
+                reasoning_effort="high",
+                semaphore=semaphore,
+            )
         payload = parse_json_object(response)
         decision = decision_from_payload(
             payload,

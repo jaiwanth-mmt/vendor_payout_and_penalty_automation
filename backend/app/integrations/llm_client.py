@@ -8,6 +8,12 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from backend.app.integrations.llm_usage import (
+    LlmTokenUsage,
+    extract_usage,
+    notify_recorded_usage,
+)
+
 
 DEFAULT_MAX_COMPLETION_TOKENS = 2048
 DEFAULT_REASONING_EFFORT = "minimal"
@@ -118,17 +124,27 @@ def call_azure_openai(
         raise ValueError("AZURE_OPENAI_CHAT_COMPLETIONS_URL and AZURE_OPENAI_API_KEY are required in .env.")
 
     budgets = azure_completion_token_budgets(max_completion_tokens)
-    for attempt, token_budget in enumerate(budgets, start=1):
-        payload = build_azure_openai_payload(prompt, token_budget, reasoning_effort)
-        response_payload = _post_azure_openai_sync(api_url, api_key, payload)
-        try:
-            return azure_message_content(response_payload, attempts=attempt)
-        except AzureOpenAIEmptyMessageError as error:
-            if should_retry_empty_message(error, attempt=attempt, max_attempts=len(budgets)):
-                continue
-            raise
+    billed = LlmTokenUsage()
+    recorded = False
+    try:
+        for attempt, token_budget in enumerate(budgets, start=1):
+            payload = build_azure_openai_payload(prompt, token_budget, reasoning_effort)
+            response_payload = _post_azure_openai_sync(api_url, api_key, payload)
+            billed = billed.added(extract_usage(response_payload))
+            try:
+                content = azure_message_content(response_payload, attempts=attempt)
+                notify_recorded_usage(billed, calls=1)
+                recorded = True
+                return content
+            except AzureOpenAIEmptyMessageError as error:
+                if should_retry_empty_message(error, attempt=attempt, max_attempts=len(budgets)):
+                    continue
+                raise
 
-    raise AzureOpenAIEmptyMessageError(finish_reason="length", attempts=len(budgets))
+        raise AzureOpenAIEmptyMessageError(finish_reason="length", attempts=len(budgets))
+    finally:
+        if not recorded and billed.has_tokens:
+            notify_recorded_usage(billed, calls=1)
 
 
 async def call_azure_openai_async(
@@ -142,17 +158,27 @@ async def call_azure_openai_async(
         raise ValueError("AZURE_OPENAI_CHAT_COMPLETIONS_URL and AZURE_OPENAI_API_KEY are required in .env.")
 
     budgets = azure_completion_token_budgets(max_completion_tokens)
-    for attempt, token_budget in enumerate(budgets, start=1):
-        payload = build_azure_openai_payload(prompt, token_budget, reasoning_effort)
-        response_payload = await _post_azure_openai_async(api_url, api_key, payload)
-        try:
-            return azure_message_content(response_payload, attempts=attempt)
-        except AzureOpenAIEmptyMessageError as error:
-            if should_retry_empty_message(error, attempt=attempt, max_attempts=len(budgets)):
-                continue
-            raise
+    billed = LlmTokenUsage()
+    recorded = False
+    try:
+        for attempt, token_budget in enumerate(budgets, start=1):
+            payload = build_azure_openai_payload(prompt, token_budget, reasoning_effort)
+            response_payload = await _post_azure_openai_async(api_url, api_key, payload)
+            billed = billed.added(extract_usage(response_payload))
+            try:
+                content = azure_message_content(response_payload, attempts=attempt)
+                notify_recorded_usage(billed, calls=1)
+                recorded = True
+                return content
+            except AzureOpenAIEmptyMessageError as error:
+                if should_retry_empty_message(error, attempt=attempt, max_attempts=len(budgets)):
+                    continue
+                raise
 
-    raise AzureOpenAIEmptyMessageError(finish_reason="length", attempts=len(budgets))
+        raise AzureOpenAIEmptyMessageError(finish_reason="length", attempts=len(budgets))
+    finally:
+        if not recorded and billed.has_tokens:
+            notify_recorded_usage(billed, calls=1)
 
 
 async def maybe_call_llm(

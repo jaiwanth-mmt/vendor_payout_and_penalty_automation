@@ -260,6 +260,42 @@ export type CategoryProgress = {
   completed_at: string | null;
 };
 
+export type LlmUsagePricing = {
+  input_usd_per_1m: number;
+  output_usd_per_1m: number;
+  cached_input_usd_per_1m: number;
+  currency: string;
+};
+
+export type LlmUsageTotals = {
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+};
+
+export type LlmUsageByPurpose = {
+  purpose: string;
+  label: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+};
+
+export type LlmUsageSummary = {
+  model: string;
+  pricing: LlmUsagePricing;
+  totals: LlmUsageTotals;
+  by_purpose: LlmUsageByPurpose[];
+  case_count: number;
+  notes: string[];
+};
+
 export type JobResponse = {
   job_id: string;
   status: JobStatus;
@@ -283,6 +319,7 @@ export type JobResponse = {
   graph_events: GraphEvent[];
   pending_interrupts: PendingInterrupt[];
   graph_topology: GraphTopology | null;
+  llm_usage: LlmUsageSummary | null;
   download_ready: boolean;
   error: string | null;
 };

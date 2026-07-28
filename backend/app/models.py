@@ -246,6 +246,42 @@ class CategoryProgress(BaseModel):
     completed_at: str | None = None
 
 
+class LlmUsagePricing(BaseModel):
+    input_usd_per_1m: float = 1.25
+    output_usd_per_1m: float = 10.0
+    cached_input_usd_per_1m: float = 0.13
+    currency: str = "USD"
+
+
+class LlmUsageTotals(BaseModel):
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class LlmUsageByPurpose(BaseModel):
+    purpose: str
+    label: str
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class LlmUsageSummary(BaseModel):
+    model: str = "gpt-5"
+    pricing: LlmUsagePricing = Field(default_factory=LlmUsagePricing)
+    totals: LlmUsageTotals = Field(default_factory=LlmUsageTotals)
+    by_purpose: list[LlmUsageByPurpose] = Field(default_factory=list)
+    case_count: int = 0
+    notes: list[str] = Field(default_factory=list)
+
+
 class JobResponse(BaseModel):
     job_id: str
     status: JobStatus
@@ -269,6 +305,7 @@ class JobResponse(BaseModel):
     graph_events: list[dict[str, Any]] = Field(default_factory=list)
     pending_interrupts: list[PendingInterrupt] = Field(default_factory=list)
     graph_topology: dict[str, Any] | None = None
+    llm_usage: LlmUsageSummary | None = None
     download_ready: bool = False
     error: str | None = None
 

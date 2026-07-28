@@ -327,7 +327,8 @@ h2 {
 
 .progressPage,
 .outputsPage,
-.reviewPage {
+.reviewPage,
+.usagePage {
   display: grid;
   gap: 18px;
 }
@@ -1822,6 +1823,86 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.usageKpiGrid {
+  margin-top: 4px;
+}
+
+.usageRateCard {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius);
+  background: var(--color-panel);
+}
+
+.usageRateCard p {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.usageDisclaimer {
+  color: var(--color-muted) !important;
+  font-size: 0.8rem !important;
+}
+
+.usageBreakdownPanel {
+  margin: 0 0 14px;
+}
+
+.usageTableWrap {
+  overflow-x: auto;
+}
+
+.usageTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.usageTable th,
+.usageTable td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.usageTable th {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.usageTable td:not(:first-child),
+.usageTable th:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usageTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.usageEfficiencyStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.usageNotes {
+  margin: 0 0 4px;
+  padding-left: 1.15rem;
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .agentKpiCard {

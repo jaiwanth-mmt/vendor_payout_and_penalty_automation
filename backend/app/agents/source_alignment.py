@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from backend.app.agents.llm import AgentLlmGenerator, maybe_call_agent_llm
+from backend.app.integrations.llm_usage import llm_purpose
 from backend.app.agents.models import ClaimCase, clean_text, json_safe
 from backend.app.domain.complaint_message import (
     build_text_category_classification_prompt,
@@ -286,13 +287,14 @@ async def classify_comparison_categories(
     semaphore,
 ) -> list[str]:
     prompt = build_text_category_classification_prompt(source_label=source_label, text=text)
-    response = await maybe_call_agent_llm(
-        llm_generator,
-        prompt,
-        max_completion_tokens=2048,
-        reasoning_effort="minimal",
-        semaphore=semaphore,
-    )
+    with llm_purpose("source_alignment"):
+        response = await maybe_call_agent_llm(
+            llm_generator,
+            prompt,
+            max_completion_tokens=2048,
+            reasoning_effort="minimal",
+            semaphore=semaphore,
+        )
     categories = parse_message_categories(response)
     return normalize_cab_delay_selection(categories, sub_category="", remarks=text, comments="")
 
