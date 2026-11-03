@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time as time_module
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -10,6 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
+import httpx
 import pandas as pd
 import pymysql
 from pymysql.connections import Connection
@@ -24,7 +27,10 @@ from backend.app.integrations.redash_call_comments import (
     parse_source_ids,
 )
 
+logger = logging.getLogger(__name__)
 
+DEFAULT_MYSQL_API_URL = "http://cabs-incabs-ryde-reports.prd.mmt.internal/scripts/mysql/runQuery"
+DEFAULT_MYSQL_API_TIMEOUT_SECONDS = 60.0
 DEFAULT_DB_HOST = "10.212.92.159"
 DEFAULT_DB_PORT = 3307
 DEFAULT_DB_USER = "incabs_blocks_and_confirms_stg"
@@ -169,16 +175,93 @@ def read_penalty_bookings(path: Path) -> pd.DataFrame:
 
 
 
+class MysqlApiError(RuntimeError):
+    """Raised when the internal MySQL query service fails or returns an error."""
+
+
 @dataclass(frozen=True)
 class MysqlConfig:
-    host: str
-    port: int
-    user: str
-    password: str
-    database: str
+    database: str = DEFAULT_DB_NAME
     table_name: str = DEFAULT_TABLE_NAME
     suppliers_table_name: str = DEFAULT_SUPPLIERS_TABLE_NAME
+    api_url: str = DEFAULT_MYSQL_API_URL
     batch_size: int = 100
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS
+    # Legacy direct MySQL credentials (kept for backwards compatibility / fallback)
+    host: str = DEFAULT_DB_HOST
+    port: int = DEFAULT_DB_PORT
+    user: str = DEFAULT_DB_USER
+    password: str = ""
+
+
+def escape_sql_literal(value: Any) -> str:
+    """Safely escape a value for inclusion as a MySQL string literal."""
+    if value is None:
+        return "NULL"
+    raw = str(value)
+    escaped = raw.replace("\\", "\\\\").replace("'", "''")
+    return f"'{escaped}'"
+
+
+def execute_mysql_api_query(
+    api_url: str,
+    database: str,
+    query: str,
+    *,
+    client: httpx.Client | None = None,
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
+    max_retries: int = 3,
+) -> list[dict[str, Any]]:
+    """Execute a read-only query against the internal HTTP MySQL query service with retries."""
+    payload = {"dbname": database, "query": query}
+    headers = {"Content-Type": "application/json"}
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            if client is not None:
+                response = client.post(api_url, json=payload, headers=headers, timeout=timeout_seconds)
+            else:
+                with httpx.Client(timeout=timeout_seconds) as session:
+                    response = session.post(api_url, json=payload, headers=headers)
+
+            if response.status_code >= 500:
+                raise MysqlApiError(
+                    f"MySQL API returned server error status {response.status_code}: {response.text[:200]}"
+                )
+            response.raise_for_status()
+
+            body = response.json()
+            if not isinstance(body, dict):
+                raise MysqlApiError(f"Unexpected response format from MySQL API: {body!r}")
+
+            if not body.get("success", False):
+                err_msg = body.get("message") or body.get("error") or str(body)
+                raise MysqlApiError(f"MySQL API query execution failed: {err_msg}")
+
+            data = body.get("data", [])
+            if not isinstance(data, list):
+                raise MysqlApiError(f"MySQL API returned non-list data: {type(data)}")
+            return data
+
+        except (httpx.NetworkError, httpx.TimeoutException, MysqlApiError) as error:
+            last_error = error
+            # If it's a MySQL syntax/semantic error reported in success=False, don't retry, fail immediately
+            if isinstance(error, MysqlApiError) and "query execution failed" in str(error).lower():
+                raise
+            if attempt < max_retries:
+                time_sleep = 0.5 * (2 ** (attempt - 1))
+                time_module.sleep(time_sleep)
+                continue
+            raise MysqlApiError(
+                f"Failed to execute MySQL API query after {max_retries} attempts at {api_url}: {error}"
+            ) from error
+        except Exception as error:
+            raise MysqlApiError(f"Unexpected error calling MySQL API at {api_url}: {error}") from error
+
+    if last_error:
+        raise last_error
+    return []
 
 
 def connect_to_mysql_from_config(config: MysqlConfig) -> Connection:
@@ -203,17 +286,39 @@ def normalize_identifier(value: str) -> str:
     return re.sub(r"[\s_]+", "", value.casefold())
 
 
-def resolve_table_name(connection: Connection, database: str, requested_table_name: str) -> str:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT TABLE_NAME
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = %s
-            """,
-            (database,),
+def resolve_table_name(
+    target: Connection | str,
+    database: str,
+    requested_table_name: str,
+    *,
+    client: httpx.Client | None = None,
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
+) -> str:
+    if isinstance(target, str):
+        sql = (
+            "SELECT TABLE_NAME "
+            "FROM INFORMATION_SCHEMA.TABLES "
+            f"WHERE TABLE_SCHEMA = {escape_sql_literal(database)}"
         )
-        table_names = [row["TABLE_NAME"] for row in cursor.fetchall()]
+        rows = execute_mysql_api_query(
+            target,
+            database,
+            sql,
+            client=client,
+            timeout_seconds=timeout_seconds,
+        )
+        table_names = [row["TABLE_NAME"] for row in rows if "TABLE_NAME" in row]
+    else:
+        with target.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = %s
+                """,
+                (database,),
+            )
+            table_names = [row["TABLE_NAME"] for row in cursor.fetchall()]
 
     if requested_table_name in table_names:
         return requested_table_name
@@ -226,19 +331,43 @@ def resolve_table_name(connection: Connection, database: str, requested_table_na
     raise LookupError(f"Could not find table {requested_table_name!r} in database {database!r}.")
 
 
-def fetch_table_columns(connection: Connection, database: str, table_name: str) -> list[str]:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = %s
-              AND TABLE_NAME = %s
-            ORDER BY ORDINAL_POSITION
-            """,
-            (database, table_name),
+def fetch_table_columns(
+    target: Connection | str,
+    database: str,
+    table_name: str,
+    *,
+    client: httpx.Client | None = None,
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
+) -> list[str]:
+    if isinstance(target, str):
+        sql = (
+            "SELECT COLUMN_NAME "
+            "FROM INFORMATION_SCHEMA.COLUMNS "
+            f"WHERE TABLE_SCHEMA = {escape_sql_literal(database)} "
+            f"  AND TABLE_NAME = {escape_sql_literal(table_name)} "
+            "ORDER BY ORDINAL_POSITION"
         )
-        return [row["COLUMN_NAME"] for row in cursor.fetchall()]
+        rows = execute_mysql_api_query(
+            target,
+            database,
+            sql,
+            client=client,
+            timeout_seconds=timeout_seconds,
+        )
+        return [row["COLUMN_NAME"] for row in rows if "COLUMN_NAME" in row]
+    else:
+        with target.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = %s
+                ORDER BY ORDINAL_POSITION
+                """,
+                (database, table_name),
+            )
+            return [row["COLUMN_NAME"] for row in cursor.fetchall()]
 
 
 def choose_relevant_columns(columns: list[str], _penalty_df: pd.DataFrame, max_columns: int) -> list[str]:
@@ -267,27 +396,50 @@ def chunked(values: list[str], size: int) -> Iterable[list[str]]:
 
 
 def fetch_tracking_rows(
-    connection: Connection,
+    target: Connection | str,
     database: str,
     table_name: str,
     columns: list[str],
     booking_ids: list[str],
     batch_size: int,
+    *,
+    client: httpx.Client | None = None,
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
 ) -> list[dict[str, Any]]:
     qualified_table_name = f"{quote_identifier(database)}.{quote_identifier(table_name)}"
     selected_columns = ", ".join(quote_identifier(column) for column in columns)
     all_rows: list[dict[str, Any]] = []
 
-    with connection.cursor() as cursor:
+    if isinstance(target, str):
         for booking_id_batch in chunked(booking_ids, batch_size):
-            placeholders = ", ".join(["%s"] * len(booking_id_batch))
+            escaped_ids = [escape_sql_literal(bid) for bid in booking_id_batch if bid]
+            if not escaped_ids:
+                continue
+            in_clause = ", ".join(escaped_ids)
             sql = (
                 f"SELECT {selected_columns} "
                 f"FROM {qualified_table_name} "
-                f"WHERE {quote_identifier(ORDER_REFERENCE_COLUMN)} IN ({placeholders})"
+                f"WHERE {quote_identifier(ORDER_REFERENCE_COLUMN)} IN ({in_clause})"
             )
-            cursor.execute(sql, booking_id_batch)
-            all_rows.extend(cursor.fetchall())
+            batch_rows = execute_mysql_api_query(
+                target,
+                database,
+                sql,
+                client=client,
+                timeout_seconds=timeout_seconds,
+            )
+            all_rows.extend(batch_rows)
+    else:
+        with target.cursor() as cursor:
+            for booking_id_batch in chunked(booking_ids, batch_size):
+                placeholders = ", ".join(["%s"] * len(booking_id_batch))
+                sql = (
+                    f"SELECT {selected_columns} "
+                    f"FROM {qualified_table_name} "
+                    f"WHERE {quote_identifier(ORDER_REFERENCE_COLUMN)} IN ({placeholders})"
+                )
+                cursor.execute(sql, booking_id_batch)
+                all_rows.extend(cursor.fetchall())
 
     return all_rows
 
@@ -313,17 +465,32 @@ def collect_supplier_ids(tracking_rows: list[dict[str, Any]]) -> list[str]:
 
 
 def fetch_supplier_vendor_names(
-    connection: Connection,
+    target: Connection | str,
     database: str,
     suppliers_table_name: str,
     supplier_ids: list[str],
     batch_size: int,
+    *,
+    client: httpx.Client | None = None,
+    timeout_seconds: float = DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, str], str]:
-    resolved_suppliers_table_name = resolve_table_name(connection, database, suppliers_table_name)
+    resolved_suppliers_table_name = resolve_table_name(
+        target,
+        database,
+        suppliers_table_name,
+        client=client,
+        timeout_seconds=timeout_seconds,
+    )
     if not supplier_ids:
         return {}, resolved_suppliers_table_name
 
-    available_columns = fetch_table_columns(connection, database, resolved_suppliers_table_name)
+    available_columns = fetch_table_columns(
+        target,
+        database,
+        resolved_suppliers_table_name,
+        client=client,
+        timeout_seconds=timeout_seconds,
+    )
     available_columns_by_name = {
         column_name.casefold(): column_name
         for column_name in available_columns
@@ -346,21 +513,46 @@ def fetch_supplier_vendor_names(
     )
     vendor_names_by_supplier_id: dict[str, str] = {}
 
-    with connection.cursor() as cursor:
+    if isinstance(target, str):
         for supplier_id_batch in chunked(supplier_ids, batch_size):
-            placeholders = ", ".join(["%s"] * len(supplier_id_batch))
+            escaped_sids = [escape_sql_literal(sid) for sid in supplier_id_batch if sid]
+            if not escaped_sids:
+                continue
+            in_clause = ", ".join(escaped_sids)
             sql = (
                 f"SELECT {quote_identifier(oid_column)} AS supplier_oid, "
                 f"{quote_identifier(vendor_name_column)} AS supplier_vendor_name "
                 f"FROM {qualified_table_name} "
-                f"WHERE {quote_identifier(oid_column)} IN ({placeholders})"
+                f"WHERE {quote_identifier(oid_column)} IN ({in_clause})"
             )
-            cursor.execute(sql, supplier_id_batch)
-            for row in cursor.fetchall():
+            rows = execute_mysql_api_query(
+                target,
+                database,
+                sql,
+                client=client,
+                timeout_seconds=timeout_seconds,
+            )
+            for row in rows:
                 supplier_id = normalize_lookup_value(row.get("supplier_oid"))
                 vendor_name = normalize_lookup_value(row.get("supplier_vendor_name"))
                 if supplier_id and vendor_name:
                     vendor_names_by_supplier_id[supplier_id] = vendor_name
+    else:
+        with target.cursor() as cursor:
+            for supplier_id_batch in chunked(supplier_ids, batch_size):
+                placeholders = ", ".join(["%s"] * len(supplier_id_batch))
+                sql = (
+                    f"SELECT {quote_identifier(oid_column)} AS supplier_oid, "
+                    f"{quote_identifier(vendor_name_column)} AS supplier_vendor_name "
+                    f"FROM {qualified_table_name} "
+                    f"WHERE {quote_identifier(oid_column)} IN ({placeholders})"
+                )
+                cursor.execute(sql, supplier_id_batch)
+                for row in cursor.fetchall():
+                    supplier_id = normalize_lookup_value(row.get("supplier_oid"))
+                    vendor_name = normalize_lookup_value(row.get("supplier_vendor_name"))
+                    if supplier_id and vendor_name:
+                        vendor_names_by_supplier_id[supplier_id] = vendor_name
 
     return vendor_names_by_supplier_id, resolved_suppliers_table_name
 

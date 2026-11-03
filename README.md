@@ -45,42 +45,42 @@ cd frontend && npm install
 
 ### Required for real jobs
 
-| Variable | Purpose |
-|---|---|
-| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | Live tracking |
-| `MYSQL_TABLE_NAME` | Default `tracking_reports_raw` |
+| Variable                                                                         | Purpose                        |
+| -------------------------------------------------------------------------------- | ------------------------------ |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | Live tracking                  |
+| `MYSQL_TABLE_NAME`                                                               | Default `tracking_reports_raw` |
 
 ### Recommended for call comments
 
-| Variable | Purpose |
-|---|---|
-| `REDASH_API_KEY` | Auth for Redash |
-| `REDASH_HOST` | Default `http://common-redash.mmt.com` |
+| Variable            | Purpose                                        |
+| ------------------- | ---------------------------------------------- |
+| `REDASH_API_KEY`    | Auth for Redash                                |
+| `REDASH_HOST`       | Default `http://common-redash.mmt.com`         |
 | `REDASH_SOURCE_IDS` | Default **`10`** (MyDesk / vortex call tables) |
 
 Without `REDASH_API_KEY`, jobs still run but the `comments` column stays empty.
 
 ### Optional
 
-| Variable | Purpose |
-|---|---|
-| `AZURE_OPENAI_CHAT_COMPLETIONS_URL` / `AZURE_OPENAI_API_KEY` | Insights, `message`, agent decisions |
-| `MYSQL_SUPPLIERS_TABLE_NAME` | Default `incabs_suppliers` |
-| `CATEGORY_PROCESSING_CONCURRENCY` | How many subcategories run in parallel (default `4`) |
-| `LLM_CONCURRENCY` | Parallel Azure calls per category worker (default `3`) |
+| Variable                                                     | Purpose                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------ |
+| `AZURE_OPENAI_CHAT_COMPLETIONS_URL` / `AZURE_OPENAI_API_KEY` | Insights, `message`, agent decisions                   |
+| `MYSQL_SUPPLIERS_TABLE_NAME`                                 | Default `incabs_suppliers`                             |
+| `CATEGORY_PROCESSING_CONCURRENCY`                            | How many subcategories run in parallel (default `4`)   |
+| `LLM_CONCURRENCY`                                            | Parallel Azure calls per category worker (default `3`) |
 
 ### Vendor penalty mailer
 
-| Variable | Purpose |
-|---|---|
-| `SMTP_HOST` | Default `smtpmail.mmt.com` |
-| `SMTP_PORT` | Default `587` |
-| `SMTP_USER` / `SMTP_PASSWORD` | SMTP auth (password only in local `.env`) |
-| `SMTP_FROM` | Default `noreply-depot@makemytrip.com` |
-| `SMTP_STARTTLS` | Default `true` |
-| `SMTP_TLS_VERIFY` | Default `true`; set `false` for `smtpmail.mmt.com` (internal CA; matches nodemailer sample) |
-| `SMTP_TIMEOUT_SECONDS` | Default `30` |
-| `MAILER_RECIPIENTS` | Comma-separated editable recipient list |
+| Variable                      | Purpose                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`                   | Default `smtpmail.mmt.com`                                                                  |
+| `SMTP_PORT`                   | Default `587`                                                                               |
+| `SMTP_USER` / `SMTP_PASSWORD` | SMTP auth (password only in local `.env`)                                                   |
+| `SMTP_FROM`                   | Default `noreply-depot@makemytrip.com`                                                      |
+| `SMTP_STARTTLS`               | Default `true`                                                                              |
+| `SMTP_TLS_VERIFY`             | Default `true`; set `false` for `smtpmail.mmt.com` (internal CA; matches nodemailer sample) |
+| `SMTP_TIMEOUT_SECONDS`        | Default `30`                                                                                |
+| `MAILER_RECIPIENTS`           | Comma-separated editable recipient list                                                     |
 
 After packaging succeeds, open **Outputs** and use **Send mail to vendor**. Preview freezes one booking per recipient; send is one-shot.
 
@@ -114,17 +114,17 @@ The processing timeline shows calm **investigation stage progress**. Raw LangGra
 
 ## LangGraph visibility APIs
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/jobs/{id}` | Job snapshot including `investigation_summary`, `pending_interrupts`, short `graph_events` |
-| `GET /api/jobs/{id}/events` | SSE stream of node/tool/interrupt events |
-| `GET /api/jobs/{id}/graph` | Mermaid topology for case + portfolio + mailer graphs |
-| `GET /api/jobs/{id}/categories/download` | ZIP of all category prepared/processed XLSX files |
-| `GET /api/jobs/{id}/interrupts` | Pending HITL payloads |
-| `POST /api/jobs/{id}/cases/{booking_id}/resume` | Resume an interrupted case |
-| `GET /api/jobs/{id}/mailer` | Frozen vendor-mail dispatch status |
-| `POST /api/jobs/{id}/mailer/preview` | Create or return frozen mail drafts |
-| `POST /api/jobs/{id}/mailer/send` | Send frozen drafts once (`preview_token` required) |
+| Endpoint                                        | Purpose                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `GET /api/jobs/{id}`                            | Job snapshot including `investigation_summary`, `pending_interrupts`, short `graph_events` |
+| `GET /api/jobs/{id}/events`                     | SSE stream of node/tool/interrupt events                                                   |
+| `GET /api/jobs/{id}/graph`                      | Mermaid topology for case + portfolio + mailer graphs                                      |
+| `GET /api/jobs/{id}/categories/download`        | ZIP of all category prepared/processed XLSX files                                          |
+| `GET /api/jobs/{id}/interrupts`                 | Pending HITL payloads                                                                      |
+| `POST /api/jobs/{id}/cases/{booking_id}/resume` | Resume an interrupted case                                                                 |
+| `GET /api/jobs/{id}/mailer`                     | Frozen vendor-mail dispatch status                                                         |
+| `POST /api/jobs/{id}/mailer/preview`            | Create or return frozen mail drafts                                                        |
+| `POST /api/jobs/{id}/mailer/send`               | Send frozen drafts once (`preview_token` required)                                         |
 
 See [docs/langgraph.md](docs/langgraph.md) for topology, tools, and policy.
 
