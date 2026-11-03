@@ -7,7 +7,7 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useJob } from "../context/JobProvider";
 
-type StageKey = "progress" | "edit" | "review" | "outputs" | "usage";
+type StageKey = "progress" | "edit" | "review" | "outputs";
 
 function stageDisabledReason(
   key: StageKey,
@@ -19,17 +19,36 @@ function stageDisabledReason(
   },
 ): string | null {
   if (key === "progress") return null;
-  if (flags.hasFailed) return "Job failed — start a new job";
+  if (flags.hasFailed) return "Job failed — start a new run";
   if (key === "edit" && !flags.showEditWorkspace) {
-    return "Available after investigation finishes";
+    return "Available once automated checks finish";
   }
   if (key === "review" && !flags.showAgentWorkspace) {
     return "Available after you approve edits";
   }
-  if ((key === "outputs" || key === "usage") && !flags.isComplete) {
-    return "Available after the job succeeds";
+  if (key === "outputs" && !flags.isComplete) {
+    return "Available after recovery package is built";
   }
   return null;
+}
+
+function formatJobStatus(status?: string): string {
+  switch (status) {
+    case "awaiting_edit":
+      return "Ready for edit";
+    case "awaiting_review":
+      return "Needs review";
+    case "running":
+      return "Processing";
+    case "queued":
+      return "Queued";
+    case "succeeded":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    default:
+      return "Ready";
+  }
 }
 
 export default function JobLayout() {
@@ -87,7 +106,6 @@ export default function JobLayout() {
     { key: "edit", label: "Edit", to: `/jobs/${jobId}/edit` },
     { key: "review", label: "Review", to: `/jobs/${jobId}/review` },
     { key: "outputs", label: "Outputs", to: `/jobs/${jobId}/outputs` },
-    { key: "usage", label: "Usage", to: `/jobs/${jobId}/usage` },
   ];
 
   return (
@@ -127,10 +145,10 @@ export default function JobLayout() {
         <div className="jobStageMeta">
           <div className="statusPill" data-state={job?.status ?? "idle"}>
             <Activity size={16} />
-            <span>{job?.status ?? "ready"}</span>
+            <span>{formatJobStatus(job?.status)}</span>
           </div>
           <Link className="ghostButton jobNewLink" to="/">
-            New job
+            New run
           </Link>
         </div>
       </div>

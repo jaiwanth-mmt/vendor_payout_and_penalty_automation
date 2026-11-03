@@ -30,10 +30,10 @@ export default function JobProgressPage() {
             <strong>Ready for edits</strong>
             <p>
               {totalCases > 0
-                ? `${totalCases} booking${totalCases === 1 ? "" : "s"} ready to check${
+                ? `${totalCases} booking${totalCases === 1 ? "" : "s"} ready to review${
                     needsCheckCount > 0 ? ` (${needsCheckCount} need your check)` : ""
                   }.`
-                : "Investigation finished — open Edit to review booking details."}
+                : "Automated checks finished — open Edit to review booking details."}
             </p>
           </div>
           <Link className="primaryButton" to={`/jobs/${jobId}/edit`}>
@@ -47,8 +47,8 @@ export default function JobProgressPage() {
       {isComplete && (
         <div className="stageCta" data-tone="success">
           <div>
-            <strong>Package ready</strong>
-            <p>Final analysis and downloads are available.</p>
+            <strong>Recovery package ready</strong>
+            <p>Final analysis, downloads, and vendor emails are available.</p>
           </div>
           <Link className="primaryButton" to={`/jobs/${jobId}/outputs`}>
             <Package size={17} />

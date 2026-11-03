@@ -31,7 +31,7 @@ export default function JobReviewPage() {
         <div className="stageCta" data-tone="success">
           <div>
             <strong>Analysis complete</strong>
-            <p>Final XLSX and category Excels are ready to preview and download.</p>
+            <p>Final Excel files and vendor emails are ready in Outputs.</p>
           </div>
           <Link className="primaryButton" to={`/jobs/${jobId}/outputs`}>
             <Package size={17} />

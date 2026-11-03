@@ -17,12 +17,12 @@ export default function AppShell() {
           </div>
           <div>
             <p className="eyebrow">MakeMyTrip cab ops</p>
-            <h1>Agentic Loss Recovery Copilot</h1>
+            <h1>Vendor Penalty & Loss Recovery</h1>
           </div>
         </Link>
         {!onJobRoute && (
           <div className="statusPill" data-state="idle">
-            <span>ready</span>
+            <span>Ready</span>
           </div>
         )}
       </header>

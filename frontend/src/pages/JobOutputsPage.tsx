@@ -23,13 +23,13 @@ export default function JobOutputsPage() {
       <div className="pageEmptySurface emptyState" role="status">
         <Package size={22} />
         <div>
-          <strong>Outputs unlock when the job succeeds</strong>
+          <strong>Outputs unlock after approving edits</strong>
           <p>
-            Finish human review if needed. Packaging runs after investigation completes.
+            Complete your review in Edit and approve to generate the final Excel files and vendor emails.
           </p>
         </div>
-        <Link className="ghostButton" to={`/jobs/${jobId}`}>
-          Back to progress
+        <Link className="ghostButton" to={`/jobs/${jobId}/edit`}>
+          Back to edit
         </Link>
       </div>
     );

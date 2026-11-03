@@ -16,6 +16,21 @@ function resultForRecipient(mailer: MailerDispatchResponse | null, recipient: st
   return mailer?.results.find((item) => item.recipient === recipient) ?? null;
 }
 
+function formatMailerStatus(status?: string): string {
+  switch (status) {
+    case "sent":
+      return "Sent";
+    case "sending":
+      return "Sending…";
+    case "failed":
+      return "Failed";
+    case "partial":
+      return "Partial delivery";
+    default:
+      return "Ready to send";
+  }
+}
+
 export default function VendorMailerPanel({ jobId, isComplete }: VendorMailerPanelProps) {
   const [mailer, setMailer] = useState<MailerDispatchResponse | null>(null);
   const [activeRecipient, setActiveRecipient] = useState<string>("");
@@ -92,18 +107,18 @@ export default function VendorMailerPanel({ jobId, isComplete }: VendorMailerPan
   }
 
   return (
-    <section className="vendorMailerSurface previewSurface" aria-label="Vendor penalty mailer">
+    <section className="vendorMailerSurface previewSurface" aria-label="Vendor penalty notifications">
       <div className="surfaceHeader">
         <div>
-          <p className="eyebrow">Vendor mailer</p>
-          <h2>Send mail to vendor</h2>
+          <p className="eyebrow">Vendor notifications</p>
+          <h2>Send penalty email to vendors</h2>
           <p>
-            One frozen draft per configured recipient. Assignments stay fixed after preview; send is allowed once.
+            Preview penalty notice drafts per vendor recipient before sending. Once sent, delivery status is tracked below.
           </p>
         </div>
         <div className="finalOutputActions">
           <span className="statusPill" data-state={mailer?.status ?? "idle"}>
-            {mailer?.status ?? "idle"}
+            {formatMailerStatus(mailer?.status)}
           </span>
         </div>
       </div>
@@ -231,7 +246,7 @@ export default function VendorMailerPanel({ jobId, isComplete }: VendorMailerPan
               </strong>
               <p>
                 {sendDisabledReason ||
-                  "Uses MAILER_RECIPIENTS from backend .env. Edit that list to change who receives mail."}
+                  "Sends notification emails to the configured vendor recipient list."}
               </p>
             </div>
             <button
@@ -243,7 +258,7 @@ export default function VendorMailerPanel({ jobId, isComplete }: VendorMailerPan
               }}
             >
               {isSending ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}
-              <span>{isSending ? "Sending…" : mailer.status === "sent" ? "Already sent" : "Send mail to vendor"}</span>
+              <span>{isSending ? "Sending…" : mailer.status === "sent" ? "Already sent" : "Send vendor emails"}</span>
             </button>
           </div>
         </>

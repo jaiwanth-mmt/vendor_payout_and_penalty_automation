@@ -50,8 +50,8 @@ function UploadPanel({
       <div className="surfaceHeader">
         <FileSpreadsheet size={22} />
         <div>
-          <h2>QlikSense input</h2>
-          <p>Loss recovery workbook</p>
+          <h2>Upload Workbook</h2>
+          <p>QlikSense loss recovery file</p>
         </div>
       </div>
 
@@ -75,7 +75,7 @@ function UploadPanel({
         />
         <span className="optionRowCopy">
           <strong>Process entire workbook</strong>
-          <small>Skip Approval/Rejected DateTime filter and keep all rows</small>
+          <small>Skip date filter and process all rows in workbook</small>
         </span>
       </label>
 
@@ -109,13 +109,13 @@ function UploadPanel({
 
       <p className="fieldHint">
         {processAll
-          ? "Date range is ignored. CARBD and recoverable filters still apply."
+          ? "Date range is skipped. Deduplication and valid recovery filters still apply."
           : "Filters on Approval/Rejected DateTime (calendar day, inclusive)."}
       </p>
 
       <button className="primaryButton" type="submit" disabled={isProcessing || !selectedFile}>
         {isProcessing ? <LoaderCircle className="spin" size={18} /> : <Play size={18} />}
-        <span>{isProcessing ? "Processing" : "Run automation"}</span>
+        <span>{isProcessing ? "Processing workbook…" : "Process workbook"}</span>
       </button>
 
       {error && (

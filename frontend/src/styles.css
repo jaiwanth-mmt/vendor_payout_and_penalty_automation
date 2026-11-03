@@ -3037,6 +3037,36 @@ h2 {
   white-space: nowrap;
 }
 
+.editSummaryChips .chipNeedsReview {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.editSummaryChips .chipUnique {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #5b21b6;
+}
+
+.editSummaryChips .chipAutoApproved {
+  background: var(--color-green-soft);
+  border-color: var(--color-green-border);
+  color: var(--color-green);
+}
+
+.editSummaryChips .chipEdited {
+  background: var(--color-blue-soft);
+  border-color: var(--color-blue-border);
+  color: var(--color-blue);
+}
+
+.editSummaryChips .chipExcluded {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475467;
+}
+
 .editToolbar,
 .editSectionToolbar {
   display: flex;

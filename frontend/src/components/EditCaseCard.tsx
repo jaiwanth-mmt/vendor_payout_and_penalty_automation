@@ -134,8 +134,8 @@ function EditCaseCard({ caseItem, disabled = false, onSave }: EditCaseCardProps)
       {caseItem.ai_bucket !== "auto_approved" && caseItem.review_reason && (
         <p className="editAiReason" title={caseItem.review_reason}>
           {caseItem.ai_bucket === "unhandled"
-            ? `Unique subcategory — decide manually: ${caseItem.review_reason}`
-            : `Why AI flagged this: ${caseItem.review_reason}`}
+            ? `Unique subcategory: ${caseItem.review_reason}`
+            : `Review reason: ${caseItem.review_reason}`}
         </p>
       )}
 
