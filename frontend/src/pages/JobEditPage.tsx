@@ -425,20 +425,19 @@ export default function JobEditPage() {
     <div className="editPage">
       <header className="editPageHeader">
         <div>
-          <p className="eyebrow">Edit bookings</p>
-          <h2>Check and fix the booking details</h2>
+          <p className="eyebrow">Review & edit</p>
+          <h2>Verify and adjust booking details</h2>
           <p>
-            Update fine amount, message, remarks, or sub category if needed. Call comments are shown for
-            reference only. Each section has its own search and filters. Approve to build or refresh the
-            recovery analysis.
+            Review fine amounts, messages, remarks, and sub-categories. You can include, exclude, or flag
+            bookings for ops follow-up. Approve when finished to build the final recovery analysis and reports.
           </p>
         </div>
         <div className="editSummaryChips">
-          <span>{needsCheckCount} need your check</span>
-          <span>{unhandledCount} unique categories</span>
-          <span>{autoCount} AI auto-approved</span>
-          <span>{editedCount} edited</span>
-          <span>{excludedCount} excluded</span>
+          <span className="chipNeedsReview">{needsCheckCount} need review</span>
+          <span className="chipUnique">{unhandledCount} unique categories</span>
+          <span className="chipAutoApproved">{autoCount} auto-approved</span>
+          <span className="chipEdited">{editedCount} edited</span>
+          <span className="chipExcluded">{excludedCount} excluded</span>
         </div>
       </header>
 
@@ -459,13 +458,13 @@ export default function JobEditPage() {
         <header className="editBucketHeader">
           <PencilLine size={18} />
           <div>
-            <h2>Needs your check</h2>
-            <p>AI flagged these bookings. Review them carefully — all sections are editable.</p>
+            <h2>Needs review</h2>
+            <p>Bookings flagged for manual verification due to remarks, SOP adjustments, or rule checks.</p>
           </div>
           <BulkActions
             matchCount={needsCheck.filteredCount}
             disabled={!canEdit || sectionLoading.needs_check}
-            onBulk={(outcome) => void handleBulk("needs_check", needsCheck, "Needs your check", outcome)}
+            onBulk={(outcome) => void handleBulk("needs_check", needsCheck, "Needs review", outcome)}
           />
         </header>
         <SectionToolbar
@@ -506,7 +505,7 @@ export default function JobEditPage() {
           </div>
         )}
         <PaginationControls
-          label="Needs your check"
+          label="Needs review"
           page={needsCheck.page}
           totalPages={needsCheck.totalPages}
           itemCount={needsCheck.filteredCount}
@@ -523,8 +522,8 @@ export default function JobEditPage() {
           <div>
             <h2>New / unique categories</h2>
             <p>
-              Sub categories not in the allowed complaint list. Decide Include / Needs ops / Exclude before
-              approval — they still appear in category previews and the package when included.
+              Sub-categories not in the standard complaint list. Decide Include / Needs ops / Exclude before
+              approval — included bookings will appear in category previews and reports.
             </p>
           </div>
           <BulkActions
@@ -592,9 +591,9 @@ export default function JobEditPage() {
           >
             <CheckCircle2 size={18} />
             <div>
-              <h2>AI auto-approved</h2>
+              <h2>Auto-approved bookings</h2>
               <p>
-                {autoCount.toLocaleString()} booking{autoCount === 1 ? "" : "s"} look ready to AI. Click to{" "}
+                {autoCount.toLocaleString()} booking{autoCount === 1 ? "" : "s"} verified against standard rules. Click to{" "}
                 {autoExpanded ? "collapse" : "expand"}.
               </p>
             </div>
@@ -603,7 +602,7 @@ export default function JobEditPage() {
           <BulkActions
             matchCount={auto.filteredCount}
             disabled={!canEdit || sectionLoading.auto_approved}
-            onBulk={(outcome) => void handleBulk("auto_approved", auto, "AI auto-approved", outcome)}
+            onBulk={(outcome) => void handleBulk("auto_approved", auto, "Auto-approved bookings", outcome)}
           />
         </div>
         {autoExpanded && (
@@ -646,7 +645,7 @@ export default function JobEditPage() {
               </div>
             )}
             <PaginationControls
-              label="AI auto-approved"
+              label="Auto-approved bookings"
               page={auto.page}
               totalPages={auto.totalPages}
               itemCount={auto.filteredCount}
@@ -669,8 +668,8 @@ export default function JobEditPage() {
               {pendingSaves > 0
                 ? "Saving your latest changes…"
                 : isReApprove
-                  ? "Re-approve to refresh Review and Outputs with your latest edits."
-                  : "Approve when you are happy with all edits."}
+                  ? "Re-approve to update Review and Outputs with your latest changes."
+                  : "Approve when you are finished reviewing bookings."}
             </p>
           </div>
           <button
@@ -682,7 +681,7 @@ export default function JobEditPage() {
             {approving ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}
             <span>
               {approving
-                ? "Building package…"
+                ? "Building recovery package…"
                 : isReApprove
                   ? "Re-approve & update"
                   : "Approve edits & continue"}
@@ -694,7 +693,7 @@ export default function JobEditPage() {
 
       {job?.status === "running" && approving && (
         <div className="inlineAlert" role="status">
-          Building recovery analysis from your edits…
+          Building recovery package from your edits…
         </div>
       )}
     </div>

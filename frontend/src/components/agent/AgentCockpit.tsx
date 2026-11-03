@@ -2,12 +2,11 @@
 
 import {
   AlertTriangle,
-  Bot,
+  BarChart3,
   ClipboardList,
   LoaderCircle,
   PencilLine,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -36,10 +35,10 @@ function AgentCockpit({ job, isWorkspaceReady }: AgentCockpitProps) {
     <section className="agentSurface">
       <div className="surfaceHeader agentHeader">
         <div className="previewTitle">
-          <Bot size={22} />
+          <BarChart3 size={22} />
           <div>
             <h2>Recovery analysis</h2>
-            <p>Numbers below reflect your approved edits.</p>
+            <p>Summary and vendor breakdown based on your approved edits.</p>
           </div>
         </div>
       </div>
@@ -52,7 +51,7 @@ function AgentCockpit({ job, isWorkspaceReady }: AgentCockpitProps) {
         <KpiCard icon={<PencilLine size={18} />} label="Edited bookings" value={editedCaseCount} />
         <KpiCard icon={<AlertTriangle size={18} />} label="Excluded" value={excludedCaseCount} />
         <KpiCard
-          icon={<Sparkles size={18} />}
+          icon={<ShieldCheck size={18} />}
           label="High-confidence recovery"
           value={formatAmount(summary?.high_confidence_recoverable_amount)}
         />
@@ -76,7 +75,7 @@ function AgentCockpit({ job, isWorkspaceReady }: AgentCockpitProps) {
               ))}
               {!recommendedActions.length && (
                 <div className="agentEmpty">
-                  <Sparkles size={24} />
+                  <ClipboardList size={24} />
                   <span>Recommendations will appear here</span>
                 </div>
               )}

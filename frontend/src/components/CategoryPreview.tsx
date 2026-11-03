@@ -211,8 +211,8 @@ function CategoryPreview({ job, isComplete, onDownload }: CategoryPreviewProps) 
         <div className="previewTitle">
           <Table2 size={21} />
           <div>
-            <h2>Category preview</h2>
-            <p>{isComplete ? `${categories.length} processed category files` : "No package yet"}</p>
+            <h2>Category Excels preview</h2>
+            <p>{isComplete ? `${categories.length} processed category workbooks` : "Available after recovery package is built"}</p>
           </div>
         </div>
         {activeCategory && (
@@ -248,7 +248,7 @@ function CategoryPreview({ job, isComplete, onDownload }: CategoryPreviewProps) 
               onClick={onDownload}
             >
               <Download size={17} />
-              <span>Download category Excels</span>
+              <span>Download category Excels (ZIP)</span>
             </button>
           </div>
         )}

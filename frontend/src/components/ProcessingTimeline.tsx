@@ -1,5 +1,4 @@
 import { AlertTriangle, CheckCircle2, ListChecks, LoaderCircle, Table2, XCircle } from "lucide-react";
-import { useState } from "react";
 
 import type {
   CategoryProgress,
@@ -20,25 +19,23 @@ type ProcessingTimelineProps = {
   hasFailed: boolean;
 };
 
-const NODE_LABELS: Record<string, string> = {
-  intake: "Intake",
-  evidence_agent: "Evidence",
-  specialist: "Specialist",
-  judge: "Judge",
-  human_review: "Human review",
-  finalize: "Finalize",
-  portfolio_summary: "Portfolio",
-  vendor_penalty_analysis: "Vendor analysis",
+const STAGE_LABELS: Record<string, string> = {
+  intake: "Booking data intake",
+  evidence_agent: "Tracking & trip check",
+  specialist: "Policy & SOP evaluation",
+  judge: "Quality & audit check",
+  human_review: "Manual review",
+  finalize: "Case finalization",
+  portfolio_summary: "Recovery summary",
+  vendor_penalty_analysis: "Vendor penalty analysis",
 };
 
 function ProcessingTimeline({
   job,
   visibleMetrics,
-  graphEvents = [],
   hasFailed,
 }: ProcessingTimelineProps) {
   const summary = job?.investigation_summary ?? null;
-  const technicalEvents = graphEvents.length ? graphEvents : job?.graph_events ?? [];
 
   return (
     <section className="processSurface">
@@ -57,7 +54,7 @@ function ProcessingTimeline({
           <AlertTriangle size={18} />
           <span>
             {summary?.status_line ||
-              "Investigation complete — open Edit to check booking details before analysis."}
+              "Automated checks complete — open Edit to review booking details before analysis."}
           </span>
         </div>
       )}
@@ -67,7 +64,7 @@ function ProcessingTimeline({
           <AlertTriangle size={18} />
           <span>
             {summary?.status_line ||
-              `Paused for human review on ${job.pending_interrupts?.length ?? 0} booking(s).`}
+              `Paused for manual review on ${job.pending_interrupts?.length ?? 0} booking(s).`}
           </span>
         </div>
       )}
@@ -103,8 +100,6 @@ function ProcessingTimeline({
       <CategoryProgressList categories={job?.category_progress ?? []} />
       <MetricsGrid metrics={visibleMetrics} />
       <WarningsList warnings={job?.warnings ?? []} />
-
-      {technicalEvents.length > 0 && <TechnicalEventDetails events={technicalEvents} />}
 
       {hasFailed && (
         <div className="failureBlock">
@@ -144,8 +139,8 @@ function InvestigationProgressPanel({
     <div className="investigationProgressPanel">
       <div className="investigationProgressHeader">
         <div>
-          <h3>Investigation progress</h3>
-          <p>{summary.status_line || "Preparing investigation"}</p>
+          <h3>Automated verification progress</h3>
+          <p>{summary.status_line || "Checking booking details"}</p>
         </div>
         <strong>
           {summary.cases_finalized}/{summary.total_cases || summary.cases_seen || 0}
@@ -155,7 +150,7 @@ function InvestigationProgressPanel({
         {summary.stages.map((stage) => (
           <div className="investigationStage" data-status={stage.status} key={stage.id}>
             <div className="investigationStageTop">
-              <span>{stage.label}</span>
+              <span>{STAGE_LABELS[stage.id] || stage.label}</span>
               <em>
                 {stage.total_units > 0
                   ? `${stage.completed_units}/${stage.total_units}`
@@ -182,54 +177,11 @@ function InvestigationProgressPanel({
       </div>
       {summary.pending_review > 0 && (
         <p className="investigationPendingNote">
-          {summary.pending_review} booking{summary.pending_review === 1 ? "" : "s"} waiting for human review
+          {summary.pending_review} booking{summary.pending_review === 1 ? "" : "s"} waiting for manual review
         </p>
       )}
     </div>
   );
-}
-
-function TechnicalEventDetails({ events }: { events: GraphEvent[] }) {
-  const [open, setOpen] = useState(false);
-  const recent = events.slice(-20).reverse();
-
-  return (
-    <details
-      className="technicalEventDetails"
-      open={open}
-      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
-    >
-      <summary>Technical event log</summary>
-      <p className="technicalEventHint">Raw LangGraph telemetry for debugging. Hidden from the main progress view.</p>
-      <ul>
-        {recent.map((event, index) => (
-          <li key={`${event.node ?? "event"}-${event.booking_id ?? ""}-${index}-${event.status ?? ""}`}>
-            <strong>{humanEventTitle(event)}</strong>
-            <p>{humanEventBody(event)}</p>
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
-function humanEventTitle(event: GraphEvent): string {
-  const nodeLabel = NODE_LABELS[event.node ?? ""] || event.node || "Graph";
-  if (event.type === "tool") {
-    return `${nodeLabel} · ${event.tool || "tool"}`;
-  }
-  if (event.type === "interrupt") {
-    return `${nodeLabel} · needs review`;
-  }
-  return nodeLabel;
-}
-
-function humanEventBody(event: GraphEvent): string {
-  const parts = [
-    event.summary || event.status || "",
-    event.booking_id ? `Booking ${event.booking_id}` : "",
-  ].filter(Boolean);
-  return parts.join(" · ");
 }
 
 function StepProgressBar({ step }: { step: StepState }) {

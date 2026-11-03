@@ -11,22 +11,22 @@ const NEXT_STEPS = [
   {
     icon: FileSpreadsheet,
     title: "Filter & prepare",
-    body: "Approval date range (or whole sheet), CARBD, recoverable amount, and Booking ID dedupe.",
+    body: "Filter approved bookings, drop cancellations and customer refunds, and remove duplicates.",
   },
   {
     icon: Radar,
-    title: "Live enrichment",
-    body: "Tracking, vendor names, call comments, and subcategory processors.",
+    title: "Live data check",
+    body: "Fetch live cab tracking, vendor details, and trip information.",
   },
   {
     icon: Sparkles,
-    title: "Investigate & edit",
-    body: "Agents investigate each booking, then you check and fix details before analysis.",
+    title: "Review & edit",
+    body: "Automated checks verify each booking, then you can review and adjust fines before approval.",
   },
   {
     icon: Package,
-    title: "Review & outputs",
-    body: "Top vendors and totals, then Final XLSX, category Excels, and audit package.",
+    title: "Analysis & exports",
+    body: "Review vendor penalty breakdown, download Excel reports, and email vendors.",
   },
 ] as const;
 
@@ -73,13 +73,13 @@ export default function NewJobPage() {
           onSubmit={submitJob}
         />
 
-        <aside className="processSurface newJobGuide" aria-label="What happens next">
+        <aside className="processSurface newJobGuide" aria-label="Workflow overview">
           <div className="surfaceHeader processHeader">
             <div className="previewTitle">
               <ClipboardCheck size={22} />
               <div>
-                <h2>What happens next</h2>
-                <p>Same path as Progress · Edit · Review · Outputs</p>
+                <h2>Workflow overview</h2>
+                <p>Progress → Edit → Review → Outputs</p>
               </div>
             </div>
           </div>
