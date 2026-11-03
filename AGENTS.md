@@ -53,8 +53,8 @@ Agentic Loss Recovery Copilot converts a QlikSense loss-recovery workbook into a
 10. On Outputs, **Send mail to vendor** runs the deterministic LangGraph mailer: freezes one draft per `MAILER_RECIPIENTS` entry (random unique booking when possible; reuse if fewer rows), previews templates, then sends once via SMTP.
 
 ## Live Tracking Config (`.env`)
-Required for API jobs: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_TABLE_NAME` (default `tracking_reports_raw`).
-Optional: `MYSQL_SUPPLIERS_TABLE_NAME` (default `incabs_suppliers`), `REDASH_*`, `AZURE_OPENAI_*`, `CATEGORY_PROCESSING_CONCURRENCY`, `LLM_CONCURRENCY`.
+Required for API jobs: `MYSQL_DATABASE` (default `incabs_blocks_and_confirms`), `MYSQL_TABLE_NAME` (default `tracking_reports_raw`), `MYSQL_API_URL` (default `http://cabs-incabs-ryde-reports.prd.mmt.internal/scripts/mysql/runQuery`).
+Optional: `MYSQL_API_TIMEOUT_SECONDS` (default `60.0`), `MYSQL_BATCH_SIZE` (default `100`), `MYSQL_SUPPLIERS_TABLE_NAME` (default `incabs_suppliers`), `REDASH_*`, `AZURE_OPENAI_*`, `CATEGORY_PROCESSING_CONCURRENCY`, `LLM_CONCURRENCY`. Direct connection params (`MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`) remain supported as legacy fallbacks.
 Vendor mailer: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`, `SMTP_TIMEOUT_SECONDS`, `MAILER_RECIPIENTS` (comma-separated editable recipient list).
 
 ## Safe Edit Guidance

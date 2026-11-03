@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
 import pandas as pd
 
 from backend.app.core.tracking_utils import first_tracking_row, read_tracking_data
@@ -20,8 +21,11 @@ from backend.app.integrations.tracking_reports import (
     DEFAULT_DB_NAME,
     DEFAULT_DB_PORT,
     DEFAULT_DB_USER,
+    DEFAULT_MYSQL_API_TIMEOUT_SECONDS,
+    DEFAULT_MYSQL_API_URL,
     DEFAULT_SUPPLIERS_TABLE_NAME,
     DEFAULT_TABLE_NAME,
+    MysqlApiError,
     MysqlConfig,
     SUPPLIER_LOOKUP_COLUMNS,
     SUPPLIER_OID_COLUMN,
@@ -138,32 +142,76 @@ class LiveTrackingRepository:
                 if column not in penalty_df.columns:
                     penalty_df[column] = ""
 
-        with connect_to_mysql_from_config(self._mysql) as connection:
-            table_name = resolve_table_name(connection, self._mysql.database, self._mysql.table_name)
-            available_columns = fetch_table_columns(connection, self._mysql.database, table_name)
-            selected_columns = choose_relevant_columns(available_columns, penalty_df, 0)
-            tracking_rows = fetch_tracking_rows(
-                connection=connection,
-                database=self._mysql.database,
-                table_name=table_name,
-                columns=selected_columns,
-                booking_ids=unique_ids,
-                batch_size=self._mysql.batch_size,
-            )
-            supplier_ids = collect_supplier_ids(tracking_rows)
-            vendor_names_by_supplier_id, suppliers_table_name = fetch_supplier_vendor_names(
-                connection=connection,
-                database=self._mysql.database,
-                suppliers_table_name=self._mysql.suppliers_table_name,
-                supplier_ids=supplier_ids,
-                batch_size=self._mysql.batch_size,
-            )
-            vendor_name_matched_row_count = add_vendor_names_to_tracking_rows(
-                tracking_rows=tracking_rows,
-                vendor_names_by_supplier_id=vendor_names_by_supplier_id,
-            )
-            if vendor_name_matched_row_count:
-                selected_columns = add_column_once(selected_columns, VENDOR_NAME_COLUMN)
+        if self._mysql.api_url:
+            with httpx.Client(timeout=self._mysql.timeout_seconds) as http_client:
+                table_name = resolve_table_name(
+                    self._mysql.api_url,
+                    self._mysql.database,
+                    self._mysql.table_name,
+                    client=http_client,
+                    timeout_seconds=self._mysql.timeout_seconds,
+                )
+                available_columns = fetch_table_columns(
+                    self._mysql.api_url,
+                    self._mysql.database,
+                    table_name,
+                    client=http_client,
+                    timeout_seconds=self._mysql.timeout_seconds,
+                )
+                selected_columns = choose_relevant_columns(available_columns, penalty_df, 0)
+                tracking_rows = fetch_tracking_rows(
+                    self._mysql.api_url,
+                    database=self._mysql.database,
+                    table_name=table_name,
+                    columns=selected_columns,
+                    booking_ids=unique_ids,
+                    batch_size=self._mysql.batch_size,
+                    client=http_client,
+                    timeout_seconds=self._mysql.timeout_seconds,
+                )
+                supplier_ids = collect_supplier_ids(tracking_rows)
+                vendor_names_by_supplier_id, suppliers_table_name = fetch_supplier_vendor_names(
+                    self._mysql.api_url,
+                    database=self._mysql.database,
+                    suppliers_table_name=self._mysql.suppliers_table_name,
+                    supplier_ids=supplier_ids,
+                    batch_size=self._mysql.batch_size,
+                    client=http_client,
+                    timeout_seconds=self._mysql.timeout_seconds,
+                )
+                vendor_name_matched_row_count = add_vendor_names_to_tracking_rows(
+                    tracking_rows=tracking_rows,
+                    vendor_names_by_supplier_id=vendor_names_by_supplier_id,
+                )
+                if vendor_name_matched_row_count:
+                    selected_columns = add_column_once(selected_columns, VENDOR_NAME_COLUMN)
+        else:
+            with connect_to_mysql_from_config(self._mysql) as connection:
+                table_name = resolve_table_name(connection, self._mysql.database, self._mysql.table_name)
+                available_columns = fetch_table_columns(connection, self._mysql.database, table_name)
+                selected_columns = choose_relevant_columns(available_columns, penalty_df, 0)
+                tracking_rows = fetch_tracking_rows(
+                    connection=connection,
+                    database=self._mysql.database,
+                    table_name=table_name,
+                    columns=selected_columns,
+                    booking_ids=unique_ids,
+                    batch_size=self._mysql.batch_size,
+                )
+                supplier_ids = collect_supplier_ids(tracking_rows)
+                vendor_names_by_supplier_id, suppliers_table_name = fetch_supplier_vendor_names(
+                    connection=connection,
+                    database=self._mysql.database,
+                    suppliers_table_name=self._mysql.suppliers_table_name,
+                    supplier_ids=supplier_ids,
+                    batch_size=self._mysql.batch_size,
+                )
+                vendor_name_matched_row_count = add_vendor_names_to_tracking_rows(
+                    tracking_rows=tracking_rows,
+                    vendor_names_by_supplier_id=vendor_names_by_supplier_id,
+                )
+                if vendor_name_matched_row_count:
+                    selected_columns = add_column_once(selected_columns, VENDOR_NAME_COLUMN)
 
         tracking_rows, selected_columns, dropped_columns = prune_unhelpful_columns(
             rows=tracking_rows,
@@ -217,22 +265,30 @@ class LiveTrackingRepository:
 
 
 def mysql_config_from_env() -> MysqlConfig:
-    password = os.getenv("MYSQL_PASSWORD", "").strip()
-    if not password:
-        raise ValueError("MYSQL_PASSWORD is required for live tracking. Set it in the environment or .env.")
+    api_url = os.getenv("MYSQL_API_URL", DEFAULT_MYSQL_API_URL).strip() or DEFAULT_MYSQL_API_URL
+    database = os.getenv("MYSQL_DATABASE", DEFAULT_DB_NAME).strip() or DEFAULT_DB_NAME
+    table_name = os.getenv("MYSQL_TABLE_NAME", DEFAULT_TABLE_NAME).strip() or DEFAULT_TABLE_NAME
+    suppliers_table_name = (
+        os.getenv("MYSQL_SUPPLIERS_TABLE_NAME", DEFAULT_SUPPLIERS_TABLE_NAME).strip()
+        or DEFAULT_SUPPLIERS_TABLE_NAME
+    )
+    batch_size = int(os.getenv("MYSQL_BATCH_SIZE", "100") or 100)
+    timeout_seconds = float(
+        os.getenv("MYSQL_API_TIMEOUT_SECONDS", str(DEFAULT_MYSQL_API_TIMEOUT_SECONDS))
+        or DEFAULT_MYSQL_API_TIMEOUT_SECONDS
+    )
 
     return MysqlConfig(
+        api_url=api_url,
+        database=database,
+        table_name=table_name,
+        suppliers_table_name=suppliers_table_name,
+        batch_size=batch_size,
+        timeout_seconds=timeout_seconds,
         host=os.getenv("MYSQL_HOST", DEFAULT_DB_HOST).strip() or DEFAULT_DB_HOST,
         port=int(os.getenv("MYSQL_PORT", str(DEFAULT_DB_PORT)) or DEFAULT_DB_PORT),
         user=os.getenv("MYSQL_USER", DEFAULT_DB_USER).strip() or DEFAULT_DB_USER,
-        password=password,
-        database=os.getenv("MYSQL_DATABASE", DEFAULT_DB_NAME).strip() or DEFAULT_DB_NAME,
-        table_name=os.getenv("MYSQL_TABLE_NAME", DEFAULT_TABLE_NAME).strip() or DEFAULT_TABLE_NAME,
-        suppliers_table_name=(
-            os.getenv("MYSQL_SUPPLIERS_TABLE_NAME", DEFAULT_SUPPLIERS_TABLE_NAME).strip()
-            or DEFAULT_SUPPLIERS_TABLE_NAME
-        ),
-        batch_size=int(os.getenv("MYSQL_BATCH_SIZE", "100") or 100),
+        password=os.getenv("MYSQL_PASSWORD", "").strip(),
     )
 
 

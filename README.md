@@ -1,140 +1,117 @@
 # Agentic Loss Recovery Copilot
 
-React + FastAPI app that turns a QlikSense loss-recovery workbook into a Cab Ops ZIP package, with a **LangGraph** investigation layer and a human **Edit** stage before final analysis.
+React 18 + FastAPI platform that automates the transformation of QlikSense loss-recovery workbooks into verified Cab Ops recovery packages, featuring live MySQL/Redash data integration, a **LangGraph** multi-agent investigation system, a human **Edit Workspace**, and a deterministic **Vendor Penalty Mailer**.
 
-For each job it:
+---
 
-1. Filters Excel rows by an **approval date range** (`Approval/Rejected DateTime`), or processes the **entire workbook** when `process_all` is set
-2. Keeps CARBD rows with non-zero Recoverable, consolidates duplicate Booking IDs
-3. Fetches **live** tracking for those Booking IDs (`order_reference_number` in MySQL)
-4. Looks up **vendor names** from `incabs_suppliers`
-5. Optionally fetches **call comments** from Redash (MyDesk source)
-6. Enriches each subcategory and classifies a complaint `message`
-7. Runs LangGraph investigation: intake → evidence tools → specialist → judge → finalize
-8. Pauses for **Edit** (humans fix fine / message / remarks / sub category, then approve)
-9. Builds portfolio analysis + ZIP → Review (read-only) → Outputs
+## 🚀 Key Subsystems & Workflow
 
-## Project layout
-
-```text
-backend/app/
-  main.py           FastAPI API (SSE, graph topology, edit / approve-edits)
-  models.py         response contracts (keep aligned with frontend types)
-  agents/           LangGraph graphs, tools, nodes, runner, policy, portfolio
-  core/             paths, env loading, shared tracking_utils
-  domain/           Excel shaping, subcategory split, category registry/enrichers
-  integrations/     Azure LLM, MySQL tracking helpers, Redash, TrackingRepository
-  services/         pipeline, edit_cases, package builder, job store
-  cli/              help entrypoint only
-frontend/src/       multi-page UI (`/`, `/jobs/:id`, `/edit`, `/review`, `/outputs`)
-data/demo/          sample workbook + reference tracking JSON (API does not read JSON for tracking)
-docs/langgraph.md   LangGraph contracts for coding agents
-docs/agent-playbook.md
-AGENTS.md           edit guidance for AI coding agents
+```mermaid
+flowchart TD
+    Upload[QlikSense Excel Upload] --> PreFilter[Date Filter + CARBD + Drop Exclusions]
+    PreFilter --> Dedupe[Consolidate Duplicates + Subcategory Split]
+    Dedupe --> LiveTracking[Live MySQL Query API + incabs_suppliers + Redash]
+    LiveTracking --> DiscardCheck{Missing supplier_id?}
+    DiscardCheck -- Yes --> Discard[Discard & Re-split Categories]
+    DiscardCheck -- No --> CategoryEnrich[Category Enrichers + SOP Fine Calculation]
+    Discard --> CategoryEnrich
+    CategoryEnrich --> DeterministicMsg[Deterministic message: Remarks → Sub Category]
+    DeterministicMsg --> LangGraph[LangGraph Investigation: Intake → Evidence → Specialist → Judge]
+    LangGraph --> PauseEdit{Job Status: awaiting_edit}
+    PauseEdit --> EditUI[Human Edit Workspace: Needs Check / Auto-Approved / Unhandled]
+    EditUI --> Approve[POST /api/jobs/id/approve-edits]
+    Approve --> Package[Rewrite Category XLSX + Portfolio Graph + Build ZIP]
+    Package --> Done[Job Status: succeeded]
+    Done --> ReviewUI[Review UI: Portfolio Analysis & Vendor Rankings]
+    Done --> OutputsUI[Outputs UI: Artifact Downloads & Vendor Mailer]
+    Done --> UsageUI[Usage UI: LLM Tokens & Estimated Cost]
 ```
 
-Runtime job artifacts are written under `backend/.runtime/` (gitignored). LangGraph checkpoints may use `backend/.runtime/langgraph/`.
+1. **Ingestion & Filtering:** Ingests QlikSense Excel rows, filters by inclusive `Approval/Rejected DateTime` range (or skips with `process_all=true`), filters to `CARBD` with non-zero recoverable amounts, and drops non-actionable rows (`User cancellation`, `Customer Delight`, and paid-amount refunds).
+2. **Duplicate Consolidation:** Merges multiple claims per `Booking ID`, aggregates loss and recoverable amounts, and merges remarks.
+3. **Live Tracking & Supplier Join:** Queries live tracking records via internal MySQL HTTP API (`tracking_reports_raw`) and joins vendor display names via `incabs_suppliers`. Bookings lacking a valid `supplier_id` across all tracking rows are discarded upfront with explicit warnings.
+4. **SOP Fine Calculation:** Computes deterministic fines for `Fulfillment Not Done / Vendor No Show` ($\min(0.50 \times \text{amount}, 500)$ for airport/local; $\min(0.25 \times \text{amount}, 2000)$ for others) using `Decimal ROUND_HALF_UP`.
+5. **Deterministic Message Synthesis:** Normalizes complaint `message` from Remarks $\rightarrow$ Sub Category against 15 canonical allowed categories (`A + B`). Customer call comments are never used to rewrite the message.
+6. **LangGraph Investigation:** Executes per-case agent graphs (`intake` $\rightarrow$ `evidence_agent` $\rightarrow$ `specialist` $\rightarrow$ `judge` $\rightarrow$ `finalize`) with `enable_hitl=False`.
+7. **Human Edit Workspace:** Pauses at `awaiting_edit`. Operators review cases across 3 AI buckets (`needs_check`, `auto_approved`, `unhandled`), perform inline or bulk edits (`include`, `needs_ops`, `exclude`), and trigger final packaging.
+8. **Packaging & Portfolio:** Rewrites processed category workbooks, excludes omitted bookings from `final_output.xlsx`, runs the portfolio analysis graph, and compiles `agentic_loss_recovery_package.zip`.
+9. **Vendor Penalty Mailer:** Freezes one draft per recipient with a SHA-256 preview token and dispatches deterministic table-formatted emails via STARTTLS SMTP.
+10. **LLM Token & Cost Accounting:** Tracks prompt, completion, and cached tokens by functional purpose, displaying real-time financial costs.
 
-## Setup
+---
 
+## 📖 Modular Documentation Suite
+
+Detailed, code-verified documentation is available in the [`docs/`](docs/) directory:
+
+- **[Master Documentation Hub](docs/README.md)** — Index of all documentation guides and workflows.
+- **[System Architecture](docs/architecture.md)** — Architectural design, component topologies, and state machines.
+- **[Data Pipeline & ETL Engine](docs/pipeline-and-etl.md)** — Workbook parsing, date filtering, drop rules, deduplication, and supplier validation.
+- **[External Integrations](docs/integrations.md)** — MySQL Query API, direct MySQL fallback, Redash call comments, Azure OpenAI, and SMTP transport.
+- **[Category Processors & SOP Fine Engine](docs/category-processors.md)** — Category registries, common tracking attributes, and the Vendor No Show SOP fine formula.
+- **[Complaint Mapping & Message Synthesis](docs/complaint-classification.md)** — The 15 canonical categories, alias dictionary, regex extractors, and delay duration parsing.
+- **[LangGraph Multi-Agent Investigation](docs/langgraph-investigation.md)** — Multi-agent state graph, evidence tools, specialist roles, and judge guardrails.
+- **[Human Edit Workspace & Decision Stage](docs/edit-stage-and-human-in-the-loop.md)** — AI bucket routing, field permissions, bulk actions, and approval lifecycle.
+- **[Packaging & Output Artifacts](docs/packaging-and-artifacts.md)** — Specifications for `final_output.xlsx`, `agent_audit.xlsx`, `manifest.json`, and ZIP bundles.
+- **[Vendor Penalty Mailer](docs/vendor-mailer.md)** — Deterministic mailer graph, table templates, preview freeze token, and SMTP dispatch.
+- **[LLM Token Usage & Cost Tracking](docs/llm-usage-and-cost.md)** — Token extraction, purpose tagging, pricing rates, and UI analytics.
+- **[REST & SSE API Reference](docs/api-reference.md)** — Complete endpoint directory, request/response models, and SSE event streaming.
+- **[Frontend Architecture & UX](docs/frontend-architecture.md)** — React 18, Vite, TypeScript, `JobProvider` session management, and UI component design.
+- **[Deployment & Operational Runbook](docs/deployment-and-configuration.md)** — Environment variables, concurrency tuning, setup, testing, and troubleshooting.
+- **[Agent Playbook & Change Recipes](docs/agent-playbook.md)** — Quick change recipes for software engineers and AI coding agents.
+
+---
+
+## 💻 Quickstart
+
+### 1. Configure Environment
 ```bash
 cp .env.example .env
-uv sync
-cd frontend && npm install
+# Edit .env with your credentials (see docs/deployment-and-configuration.md)
 ```
 
-### Required for real jobs
+### 2. Install Dependencies
+```bash
+# Backend (Python 3.12+)
+uv sync
 
-| Variable | Purpose |
-|---|---|
-| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | Live tracking |
-| `MYSQL_TABLE_NAME` | Default `tracking_reports_raw` |
+# Frontend (Node.js 18+)
+cd frontend && npm install && cd ..
+```
 
-### Recommended for call comments
+### 3. Run Locally
 
-| Variable | Purpose |
-|---|---|
-| `REDASH_API_KEY` | Auth for Redash |
-| `REDASH_HOST` | Default `http://common-redash.mmt.com` |
-| `REDASH_SOURCE_IDS` | Default **`10`** (MyDesk / vortex call tables) |
-
-Without `REDASH_API_KEY`, jobs still run but the `comments` column stays empty.
-
-### Optional
-
-| Variable | Purpose |
-|---|---|
-| `AZURE_OPENAI_CHAT_COMPLETIONS_URL` / `AZURE_OPENAI_API_KEY` | Insights, `message`, agent decisions |
-| `MYSQL_SUPPLIERS_TABLE_NAME` | Default `incabs_suppliers` |
-| `CATEGORY_PROCESSING_CONCURRENCY` | How many subcategories run in parallel (default `4`) |
-| `LLM_CONCURRENCY` | Parallel Azure calls per category worker (default `3`) |
-
-### Vendor penalty mailer
-
-| Variable | Purpose |
-|---|---|
-| `SMTP_HOST` | Default `smtpmail.mmt.com` |
-| `SMTP_PORT` | Default `587` |
-| `SMTP_USER` / `SMTP_PASSWORD` | SMTP auth (password only in local `.env`) |
-| `SMTP_FROM` | Default `noreply-depot@makemytrip.com` |
-| `SMTP_STARTTLS` | Default `true` |
-| `SMTP_TLS_VERIFY` | Default `true`; set `false` for `smtpmail.mmt.com` (internal CA; matches nodemailer sample) |
-| `SMTP_TIMEOUT_SECONDS` | Default `30` |
-| `MAILER_RECIPIENTS` | Comma-separated editable recipient list |
-
-After packaging succeeds, open **Outputs** and use **Send mail to vendor**. Preview freezes one booking per recipient; send is one-shot.
-
-For large date ranges, raise concurrency carefully (e.g. `LLM_CONCURRENCY=10`, `CATEGORY_PROCESSING_CONCURRENCY=6`) and watch for Azure rate limits. Restart uvicorn after changing `.env`.
-
-## Run locally
-
-Backend:
-
+**Backend API (Port 8000):**
 ```bash
 uv run uvicorn backend.app.main:app --reload
 ```
 
-Frontend:
-
+**Frontend Dev Server (Port 5173):**
 ```bash
 cd frontend && npm run dev
 ```
 
-## Job statuses
-
-`queued` → `running` → (`awaiting_review` if LangGraph HITL interrupts) → `succeeded` | `failed`
-
-When the job is `awaiting_review`:
-
-1. Open **Agentic Loss Recovery Copilot** (Agent cockpit)
-2. Approve or keep cases in **LangGraph human review**
-3. After the last interrupt clears, packaging runs and the final XLSX / category Excels become available
-
-The processing timeline shows calm **investigation stage progress**. Raw LangGraph SSE events stay in a collapsed technical log. Case evidence and investigation graphs stay collapsed until revealed in Agent cockpit. Download category Excels from **Category preview**.
-
-## LangGraph visibility APIs
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/jobs/{id}` | Job snapshot including `investigation_summary`, `pending_interrupts`, short `graph_events` |
-| `GET /api/jobs/{id}/events` | SSE stream of node/tool/interrupt events |
-| `GET /api/jobs/{id}/graph` | Mermaid topology for case + portfolio + mailer graphs |
-| `GET /api/jobs/{id}/categories/download` | ZIP of all category prepared/processed XLSX files |
-| `GET /api/jobs/{id}/interrupts` | Pending HITL payloads |
-| `POST /api/jobs/{id}/cases/{booking_id}/resume` | Resume an interrupted case |
-| `GET /api/jobs/{id}/mailer` | Frozen vendor-mail dispatch status |
-| `POST /api/jobs/{id}/mailer/preview` | Create or return frozen mail drafts |
-| `POST /api/jobs/{id}/mailer/send` | Send frozen drafts once (`preview_token` required) |
-
-See [docs/langgraph.md](docs/langgraph.md) for topology, tools, and policy.
-
-## Evidence policy
-
-Source-text alignment remains primary (`comments` → `Remarks` → **Sub Category when it maps** to an allowed complaint category). `Details Change` is treated as `Chauffeur/Vehicle Change`. When comments indicate Vendor No Show and/or Cab Delay family and the row is Cab Delay family or Fulfillment Not Done, the case auto-ready using **Remarks if present else Sub Category**. LangGraph tools may also return tracking/vendor/fare context as **supporting** evidence. Judge guardrails still force review on unmapped Sub Category-only rows and invalid-penalty language (booking-ID mismatch is **not** a review trigger).
-
-## Tests
-
+### 4. Run Test Suite
 ```bash
+# Backend tests (153 tests)
 uv run pytest
+
+# Frontend production build
 cd frontend && npm run build
 ```
+
+---
+
+## 📂 Deliverables & File Layout
+
+When a job succeeds, the following artifacts are generated inside `backend/.runtime/{job_id}/`:
+
+| Artifact | Format | Description |
+| :--- | :---: | :--- |
+| `final_output.xlsx` | Excel | 7-column sanitized Cab Ops recovery workbook (excluded rows omitted). |
+| `agent_audit.xlsx` | Excel | 33-column immutable audit trail documenting all decisions, evidence, and edits. |
+| `review_queue.xlsx` | Excel | Cases requiring ops follow-up (`needs_review`, `missing_evidence`, etc.). |
+| `agent_summary.json` | JSON | Executive portfolio metrics, category statistics, and vendor penalty rankings. |
+| `manifest.json` | JSON | Machine-readable manifest tracking row counts and relative file paths. |
+| `mailer_dispatch.json` | JSON | Frozen vendor email drafts, preview token, and delivery timestamps. |
+| `agentic_loss_recovery_package.zip` | ZIP | Complete archive containing all category files and output artifacts. |

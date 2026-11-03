@@ -1,121 +1,128 @@
 # LangGraph Investigation Guide
 
-Coding agents: read this before editing the investigation layer.
+Coding agents and engineers: read this before modifying the LangGraph investigation and portfolio layers.
 
-## Boundary
+For complete architectural details, see the modular guides:
+- [LangGraph Multi-Agent Investigation](langgraph-investigation.md)
+- [Human Edit Workspace & Decision Stage](edit-stage-and-human-in-the-loop.md)
+- [Vendor Penalty Mailer Engine](vendor-mailer.md)
+- [LLM Token Usage & Cost Tracking](llm-usage-and-cost.md)
 
-LangGraph owns **agent investigation + portfolio only**.
+---
 
-Leave outside the graph (deterministic prep in `pipeline.py` / `domain/`):
+## 1. Architectural Boundary
 
-- Excel date filter, CARBD / recoverable filters, dedupe
-- Live MySQL tracking + Redash comments fetch
-- Category column enrichers (`CATEGORY_ASYNC_ENRICHERS`) and deterministic complaint `message` (Remarks → Sub Category; no call-comments LLM)
+LangGraph owns **agent investigation, portfolio synthesis, and vendor penalty mailing only**.
 
-## Topology
+### Keep Outside the Graph (Deterministic Services in `pipeline.py` & `domain/`):
+- Excel date filter (`Approval/Rejected DateTime`), CARBD / recoverable filters, dedupe.
+- Exclusion filters (drop `User cancellation` / `Customer Delight` and paid-amount refunds).
+- Live MySQL tracking + Redash comments fetch.
+- Missing `supplier_id` discard rule.
+- Category column enrichers (`CATEGORY_ASYNC_ENRICHERS`).
+- Vendor No Show SOP fine formula (`ROUND_HALF_UP`).
+- Deterministic complaint `message` synthesis (Remarks $\rightarrow$ Sub Category; no call-comments LLM).
 
-Per-case graph (`thread_id = "{job_id}:{booking_id}"`):
+---
 
+## 2. Topologies
+
+### Per-Case Investigation Graph (`thread_id = "{job_id}:{booking_id}"`):
 ```text
 intake → evidence_agent → specialist → judge → human_review → finalize
 ```
 
-Job portfolio graph (`thread_id = "{job_id}:portfolio"`):
-
+### Job Portfolio Graph (`thread_id = "{job_id}:portfolio"`):
 ```text
 portfolio_summary → vendor_penalty_analysis
 ```
 
-Vendor penalty mailer graph (`thread_id = "{job_id}:mailer"`), triggered manually from Outputs after `succeeded`:
-
+### Vendor Penalty Mailer Graph (`thread_id = "{job_id}:mailer"`):
 ```text
 assign → compose → validate → send → finalize
 ```
 
-- Deterministic templates only (no LLM rewrite of title/message/fine/transcript/booking).
-- SMTP lives in [`backend/app/integrations/smtp.py`](../backend/app/integrations/smtp.py); freeze/idempotency in [`backend/app/services/mailer.py`](../backend/app/services/mailer.py).
-- Recipient list is editable via `MAILER_RECIPIENTS` in `.env`.
-- Artifact: `{job_dir}/mailer_dispatch.json` stores frozen drafts + send results.
+- **Deterministic Templates Only:** Zero LLM rewriting of title, message, fine, transcript, or booking ID. Consumes 0 LLM tokens.
+- **SMTP Transport:** Located in [`backend/app/integrations/smtp.py`](../backend/app/integrations/smtp.py).
+- **Idempotency & Freeze:** Managed by [`backend/app/services/mailer.py`](../backend/app/services/mailer.py) via SHA-256 `preview_token`.
+- **Recipient Configuration:** Configured via `MAILER_RECIPIENTS` in `.env`.
+- **Runtime Artifact:** `{job_dir}/mailer_dispatch.json` stores frozen drafts, preview token, and delivery results.
 
-Source of truth:
+---
 
-- [`backend/app/agents/graphs.py`](../backend/app/agents/graphs.py) — `build_case_graph`, `build_portfolio_graph`
-- [`backend/app/agents/mailer/`](../backend/app/agents/mailer/) — mailer state/nodes/graph/runner
-- [`backend/app/agents/nodes/investigation.py`](../backend/app/agents/nodes/investigation.py) — node bodies
-- [`backend/app/agents/runner.py`](../backend/app/agents/runner.py) — fan-out, streaming, resume
-- [`backend/app/agents/tools.py`](../backend/app/agents/tools.py) — `@tool` evidence gatherers
-- [`backend/app/agents/policy.py`](../backend/app/agents/policy.py) — deterministic guardrails
-- [`backend/app/agents/state.py`](../backend/app/agents/state.py) — `InvestigationState` / `PortfolioState`
+## 3. Evidence Tools
 
-## Tools
+The `evidence_agent` invokes 6 specialized tools using `InjectedState`:
 
-Evidence agent invokes these tools (InjectedState):
+| Tool | Purpose | Primary Data Source |
+| :--- | :--- | :--- |
+| `get_comments` | Customer call transcript | Redash MyDesk notes |
+| `get_remarks` | QlikSense Remarks | Uploaded workbook |
+| `get_sub_category` | Sub Category row context | Uploaded workbook |
+| `get_source_alignment` | Category alignment analysis | Text comparison engine |
+| `get_tracking_context` | Timing / fare / vehicle support | Live MySQL `tracking_reports_raw` |
+| `get_vendor_context` | Vendor / supplier identity | `incabs_suppliers` join |
 
-| Tool | Purpose |
-|---|---|
-| `get_comments` | Customer call transcript |
-| `get_remarks` | QlikSense Remarks |
-| `get_sub_category` | Sub Category row context |
-| `get_source_alignment` | Alignment analysis |
-| `get_tracking_context` | Timing / fare / vehicle support |
-| `get_vendor_context` | Vendor / supplier support |
+### Evidence Policy Rules
+- **Primary Category Source:** `Remarks` $\rightarrow$ `Sub Category` (when mapped).
+- **Role of Call Comments:** Comments remain available via `get_comments` for display and agent context; they **never** drive `message` or primary category classification.
+- **Deterministic Message:** Built deterministically from Remarks $\rightarrow$ Sub Category (`Fulfillment Not Done` $\rightarrow$ `Vendor No Show`). `Details Change` $\equiv$ `Chauffeur/Vehicle Change`.
+- **Supporting Context:** Tracking, vendor, and fare context are supporting evidence only; they cannot alone approve a penalty.
+- **Judge Guardrails:** Guardrails in `policy.py` force review on unmapped Sub Category-only rows, invalid-penalty language, and Vendor No Show rows where SOP fine could not be computed (missing `amount` or `ttrip_type`). Booking-ID mismatch is **not** a review trigger.
 
-**Policy:** category alignment primary is `Remarks` → Sub Category when mapped. Call comments remain available via `get_comments` for display/tools only and do not drive `message` or category primary. `message` is built deterministically from Remarks → Sub Category (`Fulfillment Not Done` → `Vendor No Show`). `Details Change` ≡ `Chauffeur/Vehicle Change`. Tracking/vendor/fare are supporting context and must not alone approve a penalty. Judge guardrails in `policy.py` still force review on unmapped Sub Category-only rows, invalid-penalty language, and Vendor No Show rows where SOP fine could not be computed (missing `amount` / `ttrip_type`) — not booking-ID mismatch. Edit-stage routing in `edit_cases.resolve_edit_bucket` additionally sends missing-Remarks mapped cases to Needs check and blank/`Uncategorized` Sub Category cases to New/unique, with explicit user-facing reasons. The Review UI no longer surfaces per-case LLM rationale or investigation graphs.
+---
 
-## Streaming + UI
-
-- Nodes emit custom events via `get_stream_writer()` (`type`, `node`, `booking_id`, `tool`, `status`, `summary`).
-- Job snapshot includes **`investigation_summary`** — executive stage progress (counts + status line). This is the primary UI surface.
-- Raw `graph_events` are retained briefly for a **collapsed technical log** only (not the main feed).
-- API: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph` (mermaid), plus `agent_progress` / `pending_interrupts`.
-- Frontend: ProcessingTimeline shows calm investigation stages; AgentCockpit keeps Mermaid topology behind **View graphs** (side-by-side when open) and case evidence behind **View full evidence**; technical SSE log is optional/collapsed.
-
-## Human edit gate (production)
+## 4. Human Edit Gate (Production)
 
 Production API jobs pass **`enable_hitl=False`**. After all cases finalize, the pipeline always pauses at **`awaiting_edit`** (no LangGraph interrupts).
 
-1. Humans PATCH editable fields via `PATCH /api/jobs/{id}/edit-cases/{booking_id}`
-2. `POST /api/jobs/{id}/approve-edits` applies outcomes, rewrites processed category XLSX, runs portfolio, builds ZIP
-3. Review UI is analysis-only (no Approve / Keep review)
+1. Humans inspect cases in 3 AI buckets: **Needs check**, **Auto-approved**, and **Unhandled (New/unique categories)**.
+2. Humans patch editable fields via `PATCH /api/jobs/{id}/edit-cases/{booking_id}` or bulk update via `POST /api/jobs/{id}/edit-cases/bulk`.
+3. `POST /api/jobs/{id}/approve-edits` applies outcomes, rewrites processed category XLSX, runs the portfolio graph, and builds the final ZIP package.
+4. The Review UI is analysis-only (KPIs, vendor rankings, recommended actions).
 
-Editable fields: recoverable (fine), message, remarks, sub_category.  
-Read-only: booking_id, call comments.  
-Outcomes: `include` → `auto_ready`; `needs_ops` → `needs_review`; `exclude` → omitted from `final_output` + recoverable totals.
+- **Editable Fields:** `recoverable_amount` (fine after SOP), `message`, `remarks`, `sub_category`, `edit_outcome`.
+- **Read-Only Fields:** `booking_id`, `comments`, `vendor_name`, `amount`, `ttrip_type`, `fine_before_sop`.
+- **Outcomes:**
+  - `include` $\rightarrow$ `auto_ready`; included in `final_output.xlsx`.
+  - `needs_ops` $\rightarrow$ `needs_review`; included in `final_output.xlsx` and `review_queue.xlsx`.
+  - `exclude` $\rightarrow$ omitted from `final_output.xlsx` and zeroed out in portfolio recoverable totals.
 
-## LangGraph HITL (tests / optional)
+---
 
-When judge `review_status` ∈ `{needs_review, missing_evidence}` and `enable_hitl=True`:
+## 5. Streaming & Event Logging
 
-1. `human_review` calls LangGraph `interrupt(payload)`
-2. Job status becomes `awaiting_review` (package not finalized)
-3. `POST /api/jobs/{id}/cases/{booking_id}/resume` resumes with `Command(resume=human_decision)`
-4. When no pending interrupts remain, packaging can run (legacy path)
+- Nodes emit custom events via `get_stream_writer()` (`type`, `node`, `booking_id`, `tool`, `status`, `summary`).
+- Real-time updates delivered via `GET /api/jobs/{id}/events` (SSE).
+- Compact executive stage progress is maintained in `job.investigation_summary`.
+- Collapsed technical event logs retain the latest 40 events.
+- Interactive graph topologies accessible via `GET /api/jobs/{id}/graph` (Mermaid format).
 
-Checkpointer: in-memory per process by default (`InMemorySaver`), keyed by `job_id`. Optional sqlite under `backend/.runtime/langgraph/` via `use_sqlite=True`.
+---
 
-Production API jobs pass `enable_hitl=False`. Unit tests that exercise interrupts pass `enable_hitl=True`.
+## 6. Azure OpenAI & Token Accounting
 
-## Azure LLM
+- Chat completions configured via `AZURE_OPENAI_CHAT_COMPLETIONS_URL` and `AZURE_OPENAI_API_KEY`.
+- LangChain chat model factory: [`backend/app/agents/langchain_model.py`](../backend/app/agents/langchain_model.py).
+- Category enrichers use [`backend/app/integrations/llm_client.py`](../backend/app/integrations/llm_client.py).
+- All requests tagged with `llm_purpose` (`specialist`, `judge`, `source_alignment`, `lower_category_vehicle`, `portfolio`).
+- Real-time token usage and cost visible on `/jobs/{id}/usage`.
 
-Use existing env only:
+---
 
-- `AZURE_OPENAI_CHAT_COMPLETIONS_URL`
-- `AZURE_OPENAI_API_KEY`
+## 7. Development Invariants ("Do Not")
 
-LangChain chat model factory: [`backend/app/agents/langchain_model.py`](../backend/app/agents/langchain_model.py). Category enrichers still use [`backend/app/integrations/llm_client.py`](../backend/app/integrations/llm_client.py).
+- **Do not** put MySQL, Redash, Excel ETL, or SMTP network sockets inside LangGraph nodes.
+- **Do not** use deprecated `langgraph.prebuilt.create_react_agent` (use fixed `StateGraph` + tools).
+- **Do not** use `langgraph-supervisor` (subcategory is already known).
+- **Do not** allow call comments to overwrite Remarks or Sub Category when generating `message`.
+- **Do not** disable TLS certificate verification for SMTP unless required by internal corporate CAs (`SMTP_TLS_VERIFY=false`).
 
-## Do not
+---
 
-- Put MySQL / Redash / Excel ETL / SMTP sockets inside LangGraph nodes (call integrations from mailer send via injected transport)
-- Use deprecated `langgraph.prebuilt.create_react_agent` (use fixed `StateGraph` + tools here)
-- Use `langgraph-supervisor` for this pipeline (subcategory is already known)
-- Reintroduce “tracking forbidden in agent decisions” — that rule is obsolete; follow the policy section above
-- Disable TLS certificate verification for SMTP
-
-## Verification
+## 8. Verification Commands
 
 ```bash
 uv run pytest
 cd frontend && npm run build
-graphify update .
 ```

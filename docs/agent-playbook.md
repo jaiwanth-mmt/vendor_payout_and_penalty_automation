@@ -1,61 +1,76 @@
-# Agent Playbook
+# Agent Playbook & Change Recipes
 
-Keep public API routes, frontend response types, final XLSX columns, and ZIP compatibility stable unless the user explicitly asks for a contract change.
+This playbook provides actionable, step-by-step recipes for software engineers and AI coding agents extending or maintaining the **Agentic Loss Recovery Copilot**.
 
-## Common Change Recipes
+For in-depth architectural and domain specifications, refer to the modular documentation:
+- [System Architecture](architecture.md)
+- [Data Pipeline & ETL Engine](pipeline-and-etl.md)
+- [Category Processors & SOP Fine Engine](category-processors.md)
+- [Complaint Mapping & Message Synthesis](complaint-classification.md)
+- [LangGraph Multi-Agent Investigation](langgraph-investigation.md)
+- [Human Edit Workspace & Decision Stage](edit-stage-and-human-in-the-loop.md)
+- [Packaging & Output Artifacts](packaging-and-artifacts.md)
+- [Vendor Penalty Mailer](vendor-mailer.md)
+- [LLM Token Usage & Cost Tracking](llm-usage-and-cost.md)
+- [REST & SSE API Reference](api-reference.md)
+- [Deployment & Operational Runbook](deployment-and-configuration.md)
 
-- **Add a subcategory processor:** add output columns to `CATEGORY_PROCESSORS` and an async enricher to `CATEGORY_ASYNC_ENRICHERS` in `backend/app/domain/category_processors.py`. Put parsing/enrichment helpers in their own `backend/app/domain/` module. LangGraph investigation runs automatically after enrichment.
-- **Add or change LangGraph behavior:** edit `backend/app/agents/` (`graphs.py`, `nodes/`, `tools.py`, `policy.py`, `runner.py`). See `docs/langgraph.md`. Do not put Excel/MySQL/Redash ETL into graph nodes.
-- **Add an evidence tool:** define `@tool` in `tools.py`, add to `INVESTIGATION_TOOLS`, and ensure evidence_agent invokes it. Update UI tool timeline expectations if needed.
-- **Change HITL routing (test-only interrupts):** edit `HITL_REVIEW_STATUSES` / `human_review_node` in `policy.py` + `nodes/investigation.py`. Production uses the edit stage instead.
-- **Change edit stage:** `backend/app/services/edit_cases.py`, `apply_edits_and_package` in `pipeline.py`, routes in `main.py`, `JobEditPage` + types.
-- **Edit bucket routing:** `resolve_edit_bucket` in `edit_cases.py` — missing Remarks → Needs check; blank/`Uncategorized` Sub Category → New/unique; unmapped Sub Category → New/unique. Bulk outcomes: `POST /api/jobs/{id}/edit-cases/bulk`.
-- **Vendor No Show SOP fine:** `backend/app/domain/fulfillment_not_done.py` (`compute_vendor_no_show_sop_fine`); airport/local → `min(0.5 * amount, 500)`, other trip types → `min(0.25 * amount, 2000)`. Edit UI shows Fine before SOP (read-only) + Fine after SOP (editable recoverable). Final Excel `fine` = after-SOP value only.
-- **Review page:** keep aggregate recovery analysis only in `AgentCockpit.tsx` (no investigation dossier / graphs).
-- **Change prepared workbook shaping:** edit `backend/app/domain/penalty_dataset.py` (including `filter_by_input_date_range`). Edit `subcategories.py` only for naming/slugging/split.
-- **Change package contents:** edit `backend/app/services/package_builder.py`.
-- **Change API progress/response fields:** update `backend/app/models.py`, `job_store.py`, and `frontend/src/types/jobs.ts` together.
-- **Change live tracking:** edit `backend/app/integrations/tracking/` and/or `tracking_reports.py` / `redash_call_comments.py`. Pipeline accepts any `TrackingRepository`.
-- **Vendor penalty mailer:** edit `integrations/smtp.py`, `domain/mail_templates.py`, `domain/mail_assignment.py`, `agents/mailer/`, `services/mailer.py`, routes in `main.py`, and `VendorMailerPanel` on Outputs. Keep recipient list in `MAILER_RECIPIENTS`.
+---
 
-## Output Contracts
+## 1. Common Change Recipes
 
-- Create job form: `file`, plus either `start_date`/`end_date` (inclusive `Approval/Rejected DateTime` range) or `process_all=true` (skip date filter).
-- JobResponse includes `start_date`, `end_date`, `process_all`.
-- Job statuses: `queued` | `running` | `awaiting_edit` | `awaiting_review` (legacy) | `succeeded` | `failed`.
-- LangGraph visibility: `investigation_summary` (primary), `agent_progress`, `graph_topology`; `graph_events` for collapsed technical detail only.
-- Edit endpoints: `GET /api/jobs/{id}/edit-cases` (optional `booking_id`, `sub_category`, `bucket`, `page`), `PATCH /api/jobs/{id}/edit-cases/{booking_id}`, `POST /api/jobs/{id}/edit-cases/bulk` (`bucket`, `edit_outcome`, optional filters), `POST /api/jobs/{id}/approve-edits`.
-- Review page is aggregate-only (KPIs + vendor/category analysis + recommended actions).
-- Legacy HITL (tests): `GET /api/jobs/{id}/interrupts`, `POST /api/jobs/{id}/cases/{booking_id}/resume`.
-- Also: `GET /api/jobs/{id}/events` (SSE), `GET /api/jobs/{id}/graph`, `GET /api/jobs/{id}/categories/download`.
-- Vendor mailer (after `succeeded`): `GET /api/jobs/{id}/mailer`, `POST /api/jobs/{id}/mailer/preview`, `POST /api/jobs/{id}/mailer/send` with `{ preview_token }`. Freeze artifact: `mailer_dispatch.json`.
-- Every processed workbook includes shared tracking fields (`amount`, `ttrip_type`, …), `message`, and agent metadata columns.
-- Fulfillment Not Done / Vendor No Show also adds `fine_before_sop` / `fine_after_sop` (not in final Excel).
-- Cab Delay adds timing + comments when available.
-- Evidence tools may include tracking/vendor context and call comments for display; source-text alignment primary for auto-ready is `Remarks` → mapped Sub Category (`message` is deterministic from the same priority).
-- ZIP: `manifest.json`, `final_output.xlsx`, `agent_audit.xlsx`, `review_queue.xlsx`, `agent_summary.json`, `category_files/prepared/*.xlsx`, `category_files/processed/*.xlsx`.
-- UI routes: `/` → `/jobs/:jobId` (progress) → `/jobs/:jobId/edit` → `/jobs/:jobId/review` (analysis) → `/jobs/:jobId/outputs`. Job session state lives in `JobProvider`.
-- `data/demo/tracking_reports_by_booking.json` is reference-only; production uses live MySQL/Redash.
+### Recipe 1: Adding a New Subcategory Processor
+1. Define output column requirements in `backend/app/domain/category_processors.py` and register in `CATEGORY_PROCESSORS`.
+2. Implement the enrichment worker in a dedicated domain module (e.g. `backend/app/domain/new_category.py`).
+3. Register the async worker in `CATEGORY_ASYNC_ENRICHERS`.
+4. The pipeline will automatically split batches, invoke the enricher, apply common tracking fields, compute `message`, and run LangGraph per-case investigation.
 
-## Test Map
+### Recipe 2: Modifying Vendor No Show SOP Fine Rules
+1. Edit `backend/app/domain/fulfillment_not_done.py` (`compute_vendor_no_show_sop_fine`).
+2. Current rules:
+   - Airport / Local (`ttrip_type` in `{"airport", "local"}`): $\min(0.50 \times \text{amount}, 500)$.
+   - Other trip types: $\min(0.25 \times \text{amount}, 2000)$.
+   - Quantized to integer with `Decimal ROUND_HALF_UP`.
+3. If changing formula or rounding, update unit tests in `backend/tests/test_fulfillment_sop_fine.py`.
+4. Ensure `fine_before_sop` and `fine_after_sop` columns remain available for the Edit UI, while `final_output.xlsx` exports only the after-SOP value in `fine`.
 
-- `test_pipeline.py`: orchestration + approve-edits packaging; inject `InMemoryTrackingRepository`.
-- `test_edit_cases.py`: edit snapshot/patch/outcomes + exclude packaging.
-- `test_api.py`: HTTP job lifecycle; monkeypatch `live_tracking_repository_from_env`; mailer preview/send gates.
-- `test_category_processors.py`: registry enrichers + LLM concurrency.
-- `test_package_builder.py`: manifest/ZIP schemas (`start_date`/`end_date`/`process_all`).
-- `test_penalty_dataset.py`: approval datetime parsing (day-first + time strip) and range filter.
-- `test_agent_llm.py`: prompts/decisions/portfolio (compat wrappers over LangGraph nodes).
-- `test_langgraph_graph.py`: graph compile, tools, HITL interrupt/resume (`enable_hitl=True`).
-- `test_smtp_client.py`: SMTP config/recipients + in-memory transport.
-- `test_mail_templates.py`: deterministic mail body + assignment reuse rules.
-- `test_mailer_graph.py`: mailer graph preview freeze, one-shot send, partial failure.
-- `factories.py`: shared workbook/tracking fixtures.
+### Recipe 3: Modifying Complaint Categories or Aliases
+1. Update `ALLOWED_COMPLAINT_CATEGORIES` or `_ALIASES` in `backend/app/domain/complaint_message.py`.
+2. If adding aliases or fuzzy matching rules, add corresponding tests to `backend/tests/test_complaint_message.py`.
+3. Keep the Remarks-first deterministic priority intact: `Remarks` $\rightarrow$ `Sub Category` (call comments must **never** be used for `message`).
 
-## Verification
+### Recipe 4: Updating the Human Edit Workspace
+1. **Backend Routing:** Modify `resolve_edit_bucket` in `backend/app/services/edit_cases.py` to adjust how cases are sorted into `needs_check`, `auto_approved`, or `unhandled`.
+2. **Patch Rules:** Adjust `patch_edit_case` in `edit_cases.py` if new editable fields are permitted.
+3. **Packaging Integration:** Ensure edits correctly map onto processed frames in `package_builder.apply_case_edits_to_processed_frame`.
+4. **Frontend UI:** Update `frontend/src/pages/JobEditPage.tsx` and `frontend/src/components/EditCaseCard.tsx`.
+5. Keep contract in sync with `frontend/src/types/jobs.ts` and `backend/app/models.py`.
 
-```bash
-uv run pytest
-cd frontend && npm run build
-graphify update .
-```
+### Recipe 5: Modifying Live Tracking Queries
+1. Edit `backend/app/integrations/tracking_reports.py` or `backend/app/integrations/tracking/repository.py`.
+2. In-memory repository for unit tests: Update `InMemoryTrackingRepository` and test fixtures in `backend/tests/factories.py`.
+3. Remember that bookings missing `supplier_id` across all tracking rows must be discarded before category processing.
+
+### Recipe 6: Modifying Vendor Penalty Mailer
+1. **Templates:** Edit plain-text or HTML email tables in `backend/app/domain/mail_templates.py`. Ensure table keys remain bold (`<strong>`).
+2. **Assignment:** Edit recipient-to-booking assignment rules in `backend/app/domain/mail_assignment.py`.
+3. **Graph Nodes:** Edit `backend/app/agents/mailer/nodes.py`. Keep template synthesis 100% deterministic (no LLM rewriting).
+4. **Dispatch Lifecycle:** Edit preview/send orchestration in `backend/app/services/mailer.py`. Keep SHA-256 `preview_token` verification intact.
+
+### Recipe 7: Modifying LLM Token Accounting & Pricing
+1. Update rates or purpose mapping in `backend/app/integrations/llm_usage.py`.
+2. When creating new agent nodes or category enrichers, wrap LLM calls in `with llm_purpose("your_purpose"):`.
+3. Update `frontend/src/pages/JobUsagePage.tsx` if displaying new usage dimensions.
+
+---
+
+## 2. Invariant Checklist Before Handoff
+
+Before submitting code changes, ensure all of the following hold true:
+- [ ] `uv run pytest` passes (all 153 tests green).
+- [ ] `cd frontend && npm run build` completes without TypeScript or Vite errors.
+- [ ] Final output contract (`final_output.xlsx`) contains exactly 7 columns in order: `booking_id`, `complaint_reasons`, `complaint_against`, `complaint_against_id`, `title`, `message`, `fine`.
+- [ ] Excluded cases (`edit_outcome == "exclude"`) are omitted from `final_output.xlsx` and zeroed out in portfolio totals.
+- [ ] No external network calls (MySQL, Redash, SMTP) are executed inside LangGraph nodes.
+- [ ] No LLMs are invoked in the vendor penalty mailer graph.
+- [ ] All new API response fields are reflected in `backend/app/models.py` and `frontend/src/types/jobs.ts`.
